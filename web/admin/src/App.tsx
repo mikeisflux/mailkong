@@ -11,6 +11,8 @@ import Pools from './pages/Pools'
 import Abuse from './pages/Abuse'
 import Plans from './pages/Plans'
 import System from './pages/System'
+import Domains from './pages/Domains'
+import Health from './pages/Health'
 import Audit from './pages/Audit'
 import Users from './pages/Users'
 import Operators from './pages/Operators'
@@ -58,8 +60,14 @@ export default function App() {
             <span className="ic">⚠</span>Abuse queue
           </NavLink>
           <div className="nav-group">Infrastructure</div>
+          <NavLink to="/domains" className={({ isActive }) => (isActive ? 'active' : '')}>
+            <span className="ic">◈</span>Domains
+          </NavLink>
           <NavLink to="/pools" className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ic">◇</span>IP pools
+          </NavLink>
+          <NavLink to="/health" className={({ isActive }) => (isActive ? 'active' : '')}>
+            <span className="ic">♥</span>Queues &amp; health
           </NavLink>
           <NavLink to="/system" className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ic">⚙</span>System
@@ -101,6 +109,8 @@ export default function App() {
             <Route path="tenants/:id" element={<TenantDetail me={me} />} />
             <Route path="messages" element={<Messages />} />
             <Route path="abuse" element={<Abuse />} />
+            <Route path="domains" element={<Domains />} />
+            <Route path="health" element={<Health />} />
             <Route path="pools" element={<Pools me={me} />} />
             <Route path="plans" element={<Plans />} />
             <Route path="system" element={<System me={me} />} />

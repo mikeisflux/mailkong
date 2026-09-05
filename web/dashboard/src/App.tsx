@@ -16,6 +16,7 @@ import Webhooks from './pages/Webhooks'
 import Inbound from './pages/Inbound'
 import Suppressions from './pages/Suppressions'
 import Usage from './pages/Usage'
+import Analytics from './pages/Analytics'
 import Settings from './pages/Settings'
 
 export default function App() {
@@ -105,6 +106,7 @@ function Workspace({ me, refresh }: { me: Me; refresh: () => Promise<void> }) {
             <Item to={`/t/${tenantId}/credentials`} icon="⚿">Credentials</Item>
             <Item to={`/t/${tenantId}/send`} icon="↗">Test send</Item>
             <Item to={`/t/${tenantId}/activity`} icon="≡">Activity</Item>
+            <Item to={`/t/${tenantId}/analytics`} icon="◔">Analytics</Item>
             <div className="nav-group">Integrations</div>
             <Item to={`/t/${tenantId}/webhooks`} icon="⚡">Webhooks</Item>
             <Item to={`/t/${tenantId}/inbound`} icon="↩">Inbound</Item>
@@ -142,6 +144,7 @@ function Workspace({ me, refresh }: { me: Me; refresh: () => Promise<void> }) {
                 <Route path="credentials" element={<Credentials tenantId={tenantId} />} />
                 <Route path="send" element={<TestSend tenantId={tenantId} />} />
                 <Route path="activity" element={<Activity tenantId={tenantId} />} />
+                <Route path="analytics" element={<Analytics tenantId={tenantId} />} />
                 <Route path="webhooks" element={<Webhooks tenantId={tenantId} />} />
                 <Route path="inbound" element={<Inbound tenantId={tenantId} />} />
                 <Route path="suppressions" element={<Suppressions tenantId={tenantId} />} />

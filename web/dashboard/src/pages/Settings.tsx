@@ -1,10 +1,30 @@
 import { useEffect, useState } from 'react'
 import { api, ApiError } from '../api'
-import { Banner, Button, Card, Copyable, Field, Spinner } from '../ui'
+import { Banner, Button, Card, Copyable, Empty, Field, Spinner } from '../ui'
 
 interface TeamPayload {
   members: Array<{ id: string; role: string; user: { id: string; email: string; name: string | null } }>
   invites: Array<{ id: string; email: string; role: string; expiresAt: string }>
+}
+
+interface SsoPayload {
+  configured: boolean
+  connection: {
+    issuer: string
+    client_id: string
+    domains: string[]
+    enforced: boolean
+    enabled: boolean
+    default_role: string
+    discovered_at: string | null
+  } | null
+  redirect_uri: string
+  login_url: string
+}
+
+interface DedicatedIpPayload {
+  request: { status: string; created_at: string } | null
+  assigned: { pool: string; addresses: Array<{ address: string; ptr: string | null; warming: boolean; daily_cap: number | null }> } | null
 }
 
 interface SettingsPayload {
@@ -49,9 +69,17 @@ export default function Settings({ tenantId, role }: { tenantId: string; role: s
   const canManageTeam = upper === 'OWNER' || upper === 'ADMIN'
   const isOwner = upper === 'OWNER'
 
+  const [sso, setSso] = useState<SsoPayload | null>(null)
+  const [ssoForm, setSsoForm] = useState({ issuer: '', client_id: '', client_secret: '', domains: '', enforced: false, default_role: 'READ_ONLY' })
+  const [editingSso, setEditingSso] = useState(false)
+  const [dedicated, setDedicated] = useState<DedicatedIpPayload | null>(null)
+
   const load = async () => {
     setTeam(await api.get<TeamPayload>(`/t/${tenantId}/team`))
     setSettings(await api.get<SettingsPayload>(`/t/${tenantId}/settings`))
+    // Both are owner-scoped, so a 403 for other roles is expected.
+    await api.get<SsoPayload>(`/t/${tenantId}/sso`).then(setSso).catch(() => setSso(null))
+    await api.get<DedicatedIpPayload>(`/t/${tenantId}/dedicated-ip`).then(setDedicated).catch(() => setDedicated(null))
   }
   useEffect(() => { void load() }, [tenantId])
 
@@ -252,6 +280,160 @@ export default function Settings({ tenantId, role }: { tenantId: string; role: s
               </tbody>
             </table>
           </div>
+        </Card>
+      )}
+
+      {sso && (
+        <Card
+          title="Single sign-on"
+          action={
+            canManageTeam && (
+              <Button className="btn-sm" onClick={() => {
+                if (!editingSso && sso.connection) {
+                  setSsoForm({
+                    issuer: sso.connection.issuer,
+                    client_id: sso.connection.client_id,
+                    client_secret: '',
+                    domains: sso.connection.domains.join(', '),
+                    enforced: sso.connection.enforced,
+                    default_role: sso.connection.default_role,
+                  })
+                }
+                setEditingSso(!editingSso)
+              }}>
+                {editingSso ? 'Cancel' : sso.configured ? 'Edit' : 'Set up'}
+              </Button>
+            )
+          }
+        >
+          {!sso.configured && !editingSso && (
+            <Empty title="Not configured">
+              <p>Let your team sign in with Google Workspace, Okta or Entra instead of a password.</p>
+            </Empty>
+          )}
+
+          {sso.configured && !editingSso && sso.connection && (
+            <>
+              <table style={{ marginBottom: 14 }}>
+                <tbody>
+                  <tr><td>Issuer</td><td className="mono">{sso.connection.issuer}</td></tr>
+                  <tr><td>Email domains</td><td className="mono">{sso.connection.domains.join(', ')}</td></tr>
+                  <tr><td>Default role for new members</td><td>{sso.connection.default_role.toLowerCase().replace('_', ' ')}</td></tr>
+                  <tr>
+                    <td>Password login</td>
+                    <td>{sso.connection.enforced ? 'Blocked for these domains' : 'Still allowed'}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <Field label="Your sign-in link" hint="Send this to your team, or link it from your intranet.">
+                <Copyable value={sso.login_url} />
+              </Field>
+              {canManageTeam && (
+                <Button variant="danger" className="btn-sm" onClick={() => {
+                  if (!confirm('Remove SSO? Members will need passwords again.')) return
+                  void act(() => api.del(`/t/${tenantId}/sso`))
+                }}>
+                  Remove SSO
+                </Button>
+              )}
+            </>
+          )}
+
+          {editingSso && (
+            <form onSubmit={(e) => {
+              e.preventDefault()
+              void act(async () => {
+                await api.put(`/t/${tenantId}/sso`, {
+                  issuer: ssoForm.issuer,
+                  client_id: ssoForm.client_id,
+                  ...(ssoForm.client_secret ? { client_secret: ssoForm.client_secret } : {}),
+                  domains: ssoForm.domains.split(',').map((d) => d.trim()).filter(Boolean),
+                  enforced: ssoForm.enforced,
+                  default_role: ssoForm.default_role,
+                })
+                setEditingSso(false)
+              })
+            }}>
+              <Field label="Redirect URI" hint="Paste this into your identity provider first — it will reject the setup otherwise.">
+                <Copyable value={sso.redirect_uri} />
+              </Field>
+              <Field label="Issuer URL" hint="e.g. https://accounts.google.com — we read its discovery document.">
+                <input value={ssoForm.issuer} onChange={(e) => setSsoForm({ ...ssoForm, issuer: e.target.value })} placeholder="https://accounts.google.com" required />
+              </Field>
+              <div className="grid grid-2">
+                <Field label="Client ID">
+                  <input value={ssoForm.client_id} onChange={(e) => setSsoForm({ ...ssoForm, client_id: e.target.value })} required />
+                </Field>
+                <Field label="Client secret" hint={sso.configured ? 'Leave blank to keep the current one.' : undefined}>
+                  <input type="password" value={ssoForm.client_secret} onChange={(e) => setSsoForm({ ...ssoForm, client_secret: e.target.value })} required={!sso.configured} />
+                </Field>
+              </div>
+              <Field label="Email domains" hint="Comma separated. We only accept sign-ins whose verified email is in one of these.">
+                <input value={ssoForm.domains} onChange={(e) => setSsoForm({ ...ssoForm, domains: e.target.value })} placeholder="yourcompany.com" required />
+              </Field>
+              <Field label="Role for members who sign in for the first time">
+                <select value={ssoForm.default_role} onChange={(e) => setSsoForm({ ...ssoForm, default_role: e.target.value })}>
+                  <option value="READ_ONLY">Read only</option>
+                  <option value="DEVELOPER">Developer</option>
+                  <option value="ADMIN">Admin</option>
+                </select>
+              </Field>
+              <label className="row" style={{ gap: 8, marginBottom: 14 }}>
+                <input type="checkbox" style={{ width: 'auto' }} checked={ssoForm.enforced} onChange={(e) => setSsoForm({ ...ssoForm, enforced: e.target.checked })} />
+                <span>Require SSO — block password sign-in for these domains</span>
+              </label>
+              <Button type="submit" variant="primary">Save SSO configuration</Button>
+            </form>
+          )}
+        </Card>
+      )}
+
+      {dedicated && (
+        <Card title="Dedicated IP">
+          {dedicated.assigned ? (
+            <>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Your mail sends from these addresses only. Their reputation is entirely yours.
+              </p>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Address</th><th>Reverse DNS</th><th>State</th></tr></thead>
+                  <tbody>
+                    {dedicated.assigned.addresses.map((a) => (
+                      <tr key={a.address}>
+                        <td className="mono">{a.address}</td>
+                        <td className="mono">{a.ptr ?? '—'}</td>
+                        <td>
+                          {a.warming
+                            ? <span style={{ color: 'var(--warn)', fontWeight: 600 }}>Warming{a.daily_cap ? ` · ${a.daily_cap.toLocaleString()}/day` : ''}</span>
+                            : <span style={{ color: 'var(--ok)', fontWeight: 600 }}>Live</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : dedicated.request && ['NEW', 'INVESTIGATING'].includes(dedicated.request.status) ? (
+            <Banner level="info">
+              Your request is with us. Allocating an address, setting its reverse DNS and warming
+              it takes a few days — we will come back to you with timing.
+            </Banner>
+          ) : (
+            <>
+              <p className="muted" style={{ marginTop: 0 }}>
+                On the shared pool your reputation is pooled with other transactional senders,
+                which is usually an advantage. A dedicated IP makes it entirely your own — worth
+                it above roughly 100,000 messages a month, and not before, since a new IP starts
+                with no reputation at all and has to be warmed.
+              </p>
+              {isOwner && (
+                <Button variant="primary" onClick={() => act(() => api.post(`/t/${tenantId}/dedicated-ip`, {}))}>
+                  Request a dedicated IP
+                </Button>
+              )}
+            </>
+          )}
         </Card>
       )}
 
