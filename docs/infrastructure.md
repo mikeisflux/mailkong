@@ -44,6 +44,36 @@ allocations. Servers cannot be moved between them.
 Microsoft, and for customer trust about where their mail originates.
 Beauharnois on the EU account is an acceptable fallback.
 
+### Datacenter: Vint Hill (US - East)
+
+Available North America locations at time of writing: Hillsboro (US West),
+Vint Hill (US East), Seattle (LocalZone), and Beauharnois (Canada East), all
+at the same price.
+
+**Vint Hill** is chosen for proximity to the Ashburn peering complex in
+Northern Virginia — the densest interconnection point on the internet, and
+the shortest path to Google, Microsoft, and Yahoo inbound MX. It is also
+closest to the roughly two thirds of the US population in Eastern and Central
+time zones.
+
+Rejected:
+
+- **Seattle (LocalZone)** — LocalZones are reduced-catalog edge deployments.
+  Additional IP availability is precisely the kind of service likely to be
+  limited or absent there, and additional IPs with editable PTR are the
+  entire reason for choosing OVH.
+- **Beauharnois** — good infrastructure, but Canadian-geolocated IP space
+  creates needless friction with filters and with customers asking where
+  their mail originates.
+- **Hillsboro** — viable, but West Coast. Choose only if the customer base
+  skews Pacific.
+
+**Both boxes go in the same datacenter.** The control plane sits in the path
+of every send: authenticate, check caps, check suppressions, then call
+Postal's API — plus the two-minute DNS verification cron and webhook fan-out.
+Same-DC is a sub-millisecond hop; Vint Hill to Hillsboro would add roughly
+60-70ms to every message sent, permanently, for no benefit.
+
 ### Port 25 is blocked by default
 
 Per OVH's current support documentation, outbound port 25 is blocked by
@@ -115,7 +145,9 @@ extra $11/mo for VPS-4 buys roughly a year of not thinking about it.
 ### Pricing caveat
 
 The advertised figures are commitment pricing (12 or 24 month). Month-to-month
-costs materially more. **Stay month-to-month on Box B** — a burned IP range
+costs materially more — VPS-2 advertised at $8.50 prices at $10.00/mo with no
+commitment, an 18% premium. Budget roughly **$38/mo** for both boxes at no
+commitment rather than the $31.87 advertised. **Stay month-to-month on Box B** — a burned IP range
 may require walking away from the box. Box A never sends mail and has no
 reputation to lose, so a 12-month commitment there is safe.
 
@@ -310,8 +342,9 @@ Box A does not need to move.
 
 ## 9. Open items
 
-- Confirm the additional-IP option is available on the VPS 2027 range
-  specifically — the range is new and this was not verified directly.
+- Confirm additional IPs are orderable for a VPS in Vint Hill specifically,
+  before ordering Box B. The VPS 2027 range is new and this was not verified
+  directly. The entire plan rests on this assumption.
 - Confirm real month-to-month pricing in the configure step; the advertised
   figures are commitment pricing.
 - A third box for `status.mail.example.com` (VPS-1, ~$4.54/mo) is a Phase 3
