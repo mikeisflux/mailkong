@@ -16,6 +16,7 @@ import { audit } from '../services/audit.js'
 import { disableTenant } from '../services/provisioning.js'
 import { authRoutes } from './auth.js'
 import { checkoutRoutes } from '../billing/checkout.js'
+import { ssoRoutes } from './sso.js'
 import { postalAdmin } from '../postal/index.js'
 import type { MemberRole } from '@prisma/client'
 
@@ -38,6 +39,7 @@ interface Ctx {
 export async function appRoutes(app: FastifyInstance): Promise<void> {
   await app.register(authRoutes)
   await app.register(checkoutRoutes)
+  await app.register(ssoRoutes)
 
   app.get('/me', async (req) => {
     const session = await readSession(req)
@@ -496,6 +498,186 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
     })
     if (count === 0) throw notFound('Invite')
     reply.code(204)
+  })
+
+  // ------------------------------------------------------- dedicated IP
+
+  /**
+   * Spec 8.2: "Dedicated IP request (creates a ticket in admin, not instant)".
+   *
+   * Deliberately not self-service. Allocating an address, setting its PTR and
+   * warming it takes days, and handing one to an account with a poor sending
+   * history just moves the problem onto an IP with no reputation to spend.
+   */
+  app.post('/t/:tenantId/dedicated-ip', async (req, reply) => {
+    const ctx = await context(req, 'billing')
+    const body = z.object({ note: z.string().max(1000).optional() }).parse(req.body ?? {})
+
+    const tenant = await prisma.tenant.findUniqueOrThrow({
+      where: { id: ctx.tenantId },
+      include: { plan: true, subscription: true },
+    })
+    const limits = planLimits(tenant.plan?.limits)
+    if (!limits.dedicatedIp) {
+      throw conflict(
+        'plan_excludes_dedicated_ip',
+        'A dedicated IP is a Pro add-on. Upgrade first and we will pick this up.',
+      )
+    }
+
+    const open = await prisma.abuseTicket.findFirst({
+      where: { tenantId: ctx.tenantId, source: 'dedicated_ip_request', status: { in: ['NEW', 'INVESTIGATING'] } },
+    })
+    if (open) {
+      throw conflict('already_requested', 'You already have a dedicated IP request open with us.')
+    }
+
+    // Reuses the operator queue rather than inventing a second inbox: it is
+    // already the screen an operator works through every morning.
+    const ticket = await prisma.abuseTicket.create({
+      data: {
+        tenantId: ctx.tenantId,
+        source: 'dedicated_ip_request',
+        subject: `Dedicated IP requested by ${tenant.name}`,
+        raw: JSON.stringify(
+          {
+            plan: tenant.plan?.key,
+            sends_this_cycle: tenant.subscription?.sendsUsed ?? 0,
+            daily_cap: tenant.dailyCap,
+            note: body.note ?? null,
+          },
+          null,
+          2,
+        ),
+        status: 'NEW',
+      },
+    })
+
+    await audit({
+      action: 'tenant.dedicated_ip_requested',
+      actorType: 'user',
+      actorId: ctx.userId,
+      tenantId: ctx.tenantId,
+      payload: { ticketId: ticket.id },
+      ip: req.ip,
+    })
+
+    reply.code(201)
+    return {
+      ok: true,
+      message: 'Request received. We will come back to you with timing — allocation and warm-up take a few days.',
+    }
+  })
+
+  app.get('/t/:tenantId/dedicated-ip', async (req) => {
+    const ctx = await context(req, 'activity')
+    const [ticket, servers] = await Promise.all([
+      prisma.abuseTicket.findFirst({
+        where: { tenantId: ctx.tenantId, source: 'dedicated_ip_request' },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.server.findMany({
+        where: { tenantId: ctx.tenantId },
+        include: { ipPool: { include: { addresses: true } } },
+      }),
+    ])
+
+    const dedicated = servers.find((s) => s.ipPool?.kind === 'DEDICATED')
+    return {
+      request: ticket ? { status: ticket.status, created_at: ticket.createdAt } : null,
+      assigned: dedicated
+        ? {
+            pool: dedicated.ipPool!.name,
+            addresses: dedicated.ipPool!.addresses.map((a) => ({
+              address: a.address,
+              ptr: a.ptr,
+              warming: a.warming,
+              daily_cap: a.dailyCap,
+            })),
+          }
+        : null,
+    }
+  })
+
+  // ----------------------------------------------------------- analytics
+
+  /** Spec 8.2 Analytics: volume, status mix, top domains, failure reasons. */
+  app.get('/t/:tenantId/analytics', async (req) => {
+    const ctx = await context(req, 'activity')
+    const q = z.object({ days: z.coerce.number().min(1).max(90).default(30) }).parse(req.query)
+    const since = new Date(Date.now() - q.days * 86_400_000)
+
+    const [daily, byStatus, byTag, recentFailures, tracking] = await Promise.all([
+      prisma.usageDay.findMany({
+        where: { tenantId: ctx.tenantId, day: { gte: since } },
+        orderBy: { day: 'asc' },
+      }),
+      prisma.message.groupBy({
+        by: ['status'],
+        where: { tenantId: ctx.tenantId, createdAt: { gte: since } },
+        _count: { _all: true },
+      }),
+      prisma.message.groupBy({
+        by: ['tag'],
+        where: { tenantId: ctx.tenantId, createdAt: { gte: since }, tag: { not: null } },
+        _count: { _all: true },
+        orderBy: { _count: { tag: 'desc' } },
+        take: 10,
+      }),
+      prisma.message.findMany({
+        where: {
+          tenantId: ctx.tenantId,
+          createdAt: { gte: since },
+          bounceReason: { not: null },
+        },
+        select: { bounceReason: true, to: true },
+        take: 500,
+      }),
+      prisma.message.aggregate({
+        where: { tenantId: ctx.tenantId, createdAt: { gte: since } },
+        _count: { openedAt: true, clickedAt: true, _all: true },
+      }),
+    ])
+
+    // Recipient domains are derived here rather than stored, so the message
+    // index stays a thin index.
+    const domainCounts = new Map<string, number>()
+    const reasonCounts = new Map<string, number>()
+    for (const row of recentFailures) {
+      const at = row.to.lastIndexOf('@')
+      if (at !== -1) {
+        const d = row.to.slice(at + 1).toLowerCase()
+        domainCounts.set(d, (domainCounts.get(d) ?? 0) + 1)
+      }
+      // Collapse to the SMTP status and first clause: the full text differs
+      // per message, and a list of 500 unique strings tells you nothing.
+      const reason = (row.bounceReason ?? '').slice(0, 90).replace(/\s+/g, ' ').trim()
+      if (reason) reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1)
+    }
+
+    const top = (m: Map<string, number>, n: number) =>
+      [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([key, count]) => ({ key, count }))
+
+    return {
+      days: q.days,
+      daily: daily.map((d) => ({
+        date: d.day.toISOString().slice(0, 10),
+        sent: d.sent,
+        delivered: d.delivered,
+        bounced: d.bounced,
+        failed: d.failed,
+        complained: d.complained,
+      })),
+      by_status: Object.fromEntries(byStatus.map((r) => [r.status.toLowerCase(), r._count._all])),
+      by_tag: byTag.map((r) => ({ tag: r.tag, count: r._count._all })),
+      failing_recipient_domains: top(domainCounts, 10),
+      failure_reasons: top(reasonCounts, 10),
+      engagement: {
+        total: tracking._count._all,
+        opened: tracking._count.openedAt,
+        clicked: tracking._count.clickedAt,
+      },
+    }
   })
 
   // ----------------------------------------------------------- org settings

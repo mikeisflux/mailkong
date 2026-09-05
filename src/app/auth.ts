@@ -10,6 +10,7 @@ import { sendPlatformMail } from '../mail/mailer.js'
 import { templates } from '../mail/templates.js'
 import { audit } from '../services/audit.js'
 import { logger } from '../lib/logger.js'
+import { assertPasswordLoginAllowed } from './sso.js'
 
 /**
  * Every flow that mints or consumes a single-use token.
@@ -100,6 +101,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/auth/login', async (req, reply) => {
     const body = z.object({ email: z.string().email(), password: z.string() }).parse(req.body)
+
+    // Checked before the credential, so an organization that requires SSO
+    // gets a clear answer rather than a password prompt that always fails.
+    await assertPasswordLoginAllowed(body.email.toLowerCase())
+
     const user = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } })
 
     // Verify against a dummy hash when the account is absent, so a missing

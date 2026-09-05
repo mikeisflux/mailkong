@@ -8,6 +8,7 @@ import { sweepDomains } from './dns.js'
 import { pruneMessages, rollupUsage } from './usage.js'
 import { sweepPolicy, warnApproachingCap, warnFailingWebhooks } from './policy.js'
 import { pruneSessions } from '../auth/session.js'
+import { checkPlatformHealth } from './health.js'
 
 /**
  * Single worker process running every queue. Split it per queue only when
@@ -44,6 +45,11 @@ const workers = [
   ),
 
   new Worker(QUEUE_NAMES.policy, async () => sweepPolicy(), {
+    connection: connection(),
+    concurrency: 1,
+  }),
+
+  new Worker(QUEUE_NAMES.health, async () => checkPlatformHealth(), {
     connection: connection(),
     concurrency: 1,
   }),

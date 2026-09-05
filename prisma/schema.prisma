@@ -154,6 +154,7 @@ model Tenant {
   ipPools           IpPool[]
   invites           Invite[]
   notificationPrefs NotificationPref?
+  sso               SsoConnection?
 
   @@index([status])
   @@index([createdAt])
@@ -191,6 +192,64 @@ enum MemberRole {
   ADMIN
   DEVELOPER
   READ_ONLY
+}
+
+/**
+ * SSO for customer teams (phase 4).
+ * OIDC rather than SAML: every identity provider a customer is likely to have
+ * -- Google Workspace, Okta, Entra -- speaks it, and it needs no XML
+ * signature handling.
+ * Binding is by email domain. A user signing in through a provider is matched
+ * to this tenant only if the verified email the provider asserts ends in one
+ * of `domains`, so a misconfigured provider cannot vend accounts into someone
+ * else's organization.
+ */
+model SsoConnection {
+  id       String @id @default(cuid())
+  tenantId String @unique @map("tenant_id")
+
+  issuer        String
+  clientId      String    @map("client_id")
+  // Encrypted, not hashed: it is presented to the provider on every exchange.
+  clientSecret  String    @map("client_secret_enc")
+  // Cached from the issuer's discovery document.
+  authEndpoint  String?   @map("auth_endpoint")
+  tokenEndpoint String?   @map("token_endpoint")
+  jwksUri       String?   @map("jwks_uri")
+  discoveredAt  DateTime? @map("discovered_at")
+
+  // Email domains this connection may claim. Verified sending domains are not
+  // reused for this: the domain you send from and the domain your staff have
+  // accounts on are frequently different.
+  domains     String[]   @default([])
+  // When set, password login is refused for members whose email matches, so
+  // an organization can require SSO rather than merely offer it.
+  enforced    Boolean    @default(false)
+  enabled     Boolean    @default(true)
+  // Role given to a member who arrives through SSO and has no membership yet.
+  defaultRole MemberRole @default(READ_ONLY)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("sso_connections")
+}
+
+/**
+ * Short-lived state for an in-flight OIDC exchange.
+ */
+model SsoState {
+  id           String   @id
+  connectionId String   @map("connection_id")
+  nonce        String
+  redirectTo   String?  @map("redirect_to")
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([expiresAt])
+  @@map("sso_states")
 }
 
 model Invite {

@@ -463,6 +463,114 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return { pool, warming: true }
   })
 
+  // ------------------------------------------------------ global domains
+
+  /** Spec 9.1 /domains: every customer domain, filterable by health. */
+  app.get('/domains', async (req) => {
+    await requireOperator(req)
+    const q = z.object({
+      search: z.string().optional(),
+      state: z.enum(['all', 'verified', 'unverified', 'broken']).default('all'),
+      limit: z.coerce.number().min(1).max(500).default(100),
+    }).parse(req.query)
+
+    const domains = await prisma.domain.findMany({
+      where: {
+        ...(q.search ? { name: { contains: q.search.toLowerCase() } } : {}),
+        ...(q.state === 'verified' ? { verifiedAt: { not: null } } : {}),
+        ...(q.state === 'unverified' ? { verifiedAt: null } : {}),
+        // "Broken" is the case worth an operator's attention: it verified
+        // once and no longer does, so the customer's mail is failing now.
+        ...(q.state === 'broken'
+          ? { verifiedAt: null, lastCheckOutput: { not: null }, lastCheckedAt: { not: null } }
+          : {}),
+      },
+      include: { tenant: { select: { id: true, name: true, slug: true, status: true } } },
+      orderBy: { lastCheckedAt: { sort: 'desc', nulls: 'last' } },
+      take: q.limit,
+    })
+
+    return {
+      data: domains.map((d) => ({
+        id: d.id,
+        name: d.name,
+        kind: d.kind,
+        tenant: d.tenant,
+        spf: d.spfOk,
+        dkim: d.dkimOk,
+        dmarc: d.dmarcOk,
+        verified: d.verifiedAt !== null,
+        last_checked_at: d.lastCheckedAt,
+        last_check_output: d.lastCheckOutput,
+      })),
+    }
+  })
+
+  // ------------------------------------------------------- queues + health
+
+  /**
+   * Spec 9.2 Queues + health. Everything an operator checks when something
+   * feels wrong, on one screen, so the answer to "is it us" takes seconds.
+   */
+  app.get('/health/detail', async (req) => {
+    await requireOperator(req)
+    const hourAgo = new Date(Date.now() - 3_600_000)
+    const dayAgo = new Date(Date.now() - 86_400_000)
+
+    const [postalQueue, postalUp, webhookFailures, webhookTotal, stuck, dbSize, oldestQueued, disabledHooks] =
+      await Promise.all([
+        postalAdmin.queueStats().catch(() => null),
+        postalAdmin.reachable(),
+        prisma.webhookDelivery.count({ where: { createdAt: { gte: hourAgo }, succeededAt: null } }),
+        prisma.webhookDelivery.count({ where: { createdAt: { gte: hourAgo } } }),
+        // Anything still queued after an hour is not queued, it is stuck.
+        prisma.message.count({ where: { status: 'QUEUED', createdAt: { lt: hourAgo } } }),
+        prisma.$queryRaw<Array<{ size: string; bytes: bigint }>>`
+          SELECT pg_size_pretty(pg_database_size(current_database())) AS size,
+                 pg_database_size(current_database()) AS bytes`,
+        prisma.message.findFirst({
+          where: { status: 'QUEUED' },
+          orderBy: { createdAt: 'asc' },
+          select: { createdAt: true },
+        }),
+        prisma.webhookEndpoint.count({ where: { enabled: false } }),
+      ])
+
+    const messages24h = await prisma.message.count({ where: { createdAt: { gte: dayAgo } } })
+
+    return {
+      postal: {
+        reachable: postalUp,
+        queued: postalQueue?.queued ?? null,
+        held: postalQueue?.held ?? null,
+        workers: postalQueue?.workers ?? null,
+      },
+      control_plane: {
+        messages_24h: messages24h,
+        stuck_queued: stuck,
+        oldest_queued_at: oldestQueued?.createdAt ?? null,
+        database_size: dbSize[0]?.size ?? null,
+        database_bytes: Number(dbSize[0]?.bytes ?? 0),
+      },
+      webhooks: {
+        attempts_last_hour: webhookTotal,
+        failures_last_hour: webhookFailures,
+        failure_rate: webhookTotal > 0 ? webhookFailures / webhookTotal : 0,
+        disabled_endpoints: disabledHooks,
+      },
+      // Thresholds live here rather than in the UI so the alerting job and
+      // the dashboard cannot disagree about what "bad" means.
+      alerts: buildHealthAlerts({
+        postalUp,
+        postalQueued: postalQueue?.queued ?? 0,
+        workers: postalQueue?.workers ?? 0,
+        stuck,
+        webhookFailureRate: webhookTotal > 0 ? webhookFailures / webhookTotal : 0,
+        databaseBytes: Number(dbSize[0]?.bytes ?? 0),
+      }),
+    }
+  })
+
   // -------------------------------------------------------------- abuse
 
   app.get('/abuse', async (req) => {
@@ -622,6 +730,55 @@ async function requireOperator(req: FastifyRequest, capability?: AdminCapability
   if (!admin) throw unauthorized('Operator sign-in required')
   if (capability) requireAdmin(admin.role, capability)
   return admin
+}
+
+export interface HealthInput {
+  postalUp: boolean
+  postalQueued: number
+  workers: number
+  stuck: number
+  webhookFailureRate: number
+  databaseBytes: number
+}
+
+/**
+ * The thresholds that define "page someone". Exported so the alerting job in
+ * jobs/health.ts uses exactly these, and the console and the pager can never
+ * disagree about whether something is wrong.
+ */
+export function buildHealthAlerts(h: HealthInput): Array<{ level: 'warning' | 'critical'; message: string }> {
+  const alerts: Array<{ level: 'warning' | 'critical'; message: string }> = []
+
+  if (!h.postalUp) {
+    alerts.push({ level: 'critical', message: 'Postal is unreachable. Sending and provisioning are both down.' })
+  }
+  if (h.postalUp && h.workers === 0) {
+    alerts.push({ level: 'critical', message: 'Postal reports no live workers. Mail is queueing and nothing is draining it.' })
+  }
+  if (h.postalQueued > 5000) {
+    alerts.push({ level: 'critical', message: `Postal queue depth is ${h.postalQueued.toLocaleString()}.` })
+  } else if (h.postalQueued > 1000) {
+    alerts.push({ level: 'warning', message: `Postal queue depth is ${h.postalQueued.toLocaleString()} and climbing.` })
+  }
+  if (h.stuck > 0) {
+    alerts.push({
+      level: h.stuck > 100 ? 'critical' : 'warning',
+      message: `${h.stuck} message(s) have been queued for over an hour. Check that Postal is accepting from the control plane.`,
+    })
+  }
+  if (h.webhookFailureRate > 0.5) {
+    alerts.push({ level: 'warning', message: `${Math.round(h.webhookFailureRate * 100)}% of webhook deliveries failed in the last hour.` })
+  }
+  // Box B's disk is the documented growth ceiling; the control-plane database
+  // filling is a different and much earlier problem.
+  const gb = h.databaseBytes / 1_000_000_000
+  if (gb > 40) {
+    alerts.push({ level: 'critical', message: `The control-plane database is ${gb.toFixed(1)} GB. Check message retention pruning.` })
+  } else if (gb > 20) {
+    alerts.push({ level: 'warning', message: `The control-plane database is ${gb.toFixed(1)} GB.` })
+  }
+
+  return alerts
 }
 
 /** Supports plain addresses and CIDR notation. IPv4 only, which is what OVH gives us. */

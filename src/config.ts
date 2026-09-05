@@ -37,6 +37,10 @@ const schema = z.object({
   SIGNUP_OPEN: bool.default('false'),
 
   ADMIN_IP_ALLOWLIST: z.string().default(''),
+
+  // Where platform alerts go. Point this OFF this infrastructure -- an
+  // outage that takes Postal down also takes the email path down.
+  ALERT_WEBHOOK_URL: z.string().url().or(z.literal('')).default(''),
 })
 
 const parsed = schema.safeParse(process.env)
