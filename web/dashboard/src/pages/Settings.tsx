@@ -75,6 +75,8 @@ export default function Settings({ tenantId, role }: { tenantId: string; role: s
 
   if (!team || !settings) return <Spinner />
 
+  const ownerCount = team.members.filter((m) => m.role === 'OWNER').length
+
   return (
     <>
       <h1 style={{ marginBottom: 20 }}>Settings</h1>
@@ -147,9 +149,13 @@ export default function Settings({ tenantId, role }: { tenantId: string; role: s
                         style={{ maxWidth: 150 }}
                       >
                         {isOwner && <option value="OWNER">Owner</option>}
-                        <option value="ADMIN">Admin</option>
-                        <option value="DEVELOPER">Developer</option>
-                        <option value="READ_ONLY">Read only</option>
+                        {!(m.role === 'OWNER' && ownerCount <= 1) && (
+                          <>
+                            <option value="ADMIN">Admin</option>
+                            <option value="DEVELOPER">Developer</option>
+                            <option value="READ_ONLY">Read only</option>
+                          </>
+                        )}
                       </select>
                     ) : (
                       m.role.toLowerCase().replace('_', ' ')
@@ -157,7 +163,10 @@ export default function Settings({ tenantId, role }: { tenantId: string; role: s
                     <div className="muted" style={{ fontSize: '.75rem', marginTop: 2 }}>{ROLE_HELP[m.role]}</div>
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    {canManageTeam && (
+                    {/* An organization must always keep one owner, so the
+                        server refuses this. Do not offer an action that can
+                        only fail. */}
+                    {canManageTeam && !(m.role === 'OWNER' && ownerCount <= 1) && (
                       <Button
                         variant="danger"
                         className="btn-sm"
