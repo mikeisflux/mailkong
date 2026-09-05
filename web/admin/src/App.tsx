@@ -12,6 +12,8 @@ import Abuse from './pages/Abuse'
 import Plans from './pages/Plans'
 import System from './pages/System'
 import Audit from './pages/Audit'
+import Users from './pages/Users'
+import Operators from './pages/Operators'
 
 export default function App() {
   const [me, setMe] = useState<Operator | null>(null)
@@ -49,6 +51,9 @@ export default function App() {
           <NavLink to="/messages" className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ic">⌕</span>Message search
           </NavLink>
+          <NavLink to="/users" className={({ isActive }) => (isActive ? 'active' : '')}>
+            <span className="ic">☺</span>Users
+          </NavLink>
           <NavLink to="/abuse" className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ic">⚠</span>Abuse queue
           </NavLink>
@@ -65,6 +70,9 @@ export default function App() {
           </NavLink>
           <NavLink to="/audit" className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ic">≡</span>Audit log
+          </NavLink>
+          <NavLink to="/operators" className={({ isActive }) => (isActive ? 'active' : '')}>
+            <span className="ic">⚑</span>Operators
           </NavLink>
         </nav>
 
@@ -96,6 +104,8 @@ export default function App() {
             <Route path="pools" element={<Pools me={me} />} />
             <Route path="plans" element={<Plans />} />
             <Route path="system" element={<System me={me} />} />
+            <Route path="users" element={<Users me={me} />} />
+            <Route path="operators" element={<Operators me={me} />} />
             <Route path="audit" element={<Audit />} />
           </Routes>
         </div>

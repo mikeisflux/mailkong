@@ -38,6 +38,15 @@ export type AdminCapability =
   | 'messages:read'
   | 'abuse:write'
   | 'system:write'
+  // Reading customer accounts is a support function; changing or deleting
+  // them is not.
+  | 'users:read'
+  | 'users:write'
+  | 'users:delete'
+  // Managing other operators is superadmin-only: anything less would let an
+  // account escalate itself by minting a more privileged one.
+  | 'operators:read'
+  | 'operators:write'
 
 const ADMIN_CAPABILITIES: Record<AdminRole, AdminCapability[]> = {
   SUPERADMIN: [
@@ -49,10 +58,24 @@ const ADMIN_CAPABILITIES: Record<AdminRole, AdminCapability[]> = {
     'messages:read',
     'abuse:write',
     'system:write',
+    'users:read',
+    'users:write',
+    'users:delete',
+    'operators:read',
+    'operators:write',
   ],
-  SUPPORT: ['tenant:pause', 'tenant:impersonate', 'messages:read', 'abuse:write'],
-  BILLING: ['plans:write', 'refunds'],
-  READ_ONLY: ['messages:read'],
+  SUPPORT: [
+    'tenant:pause',
+    'tenant:impersonate',
+    'messages:read',
+    'abuse:write',
+    'users:read',
+    // Support can unblock a customer -- reset a password, revoke sessions --
+    // but cannot delete an account or touch operator accounts.
+    'users:write',
+  ],
+  BILLING: ['plans:write', 'refunds', 'users:read'],
+  READ_ONLY: ['messages:read', 'users:read'],
 }
 
 export const adminCan = (role: AdminRole, cap: AdminCapability): boolean =>

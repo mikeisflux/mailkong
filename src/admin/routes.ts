@@ -17,6 +17,7 @@ import { audit } from '../services/audit.js'
 import { postalAdmin } from '../postal/index.js'
 import { authenticator } from 'otplib'
 import type { AdminUser } from '@prisma/client'
+import { userAdminRoutes } from './users.js'
 
 /**
  * Admin console backend for admin.mailkong.net.
@@ -26,6 +27,8 @@ import type { AdminUser } from '@prisma/client'
  * into Postal for every customer.
  */
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
+  await app.register(userAdminRoutes)
+
   // The allowlist is a network control, applied before authentication so an
   // attacker off-network cannot even probe for valid operator emails.
   app.addHook('onRequest', async (req) => {
@@ -111,22 +114,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     await createAdminSession(reply, admin.id, { ip: req.ip, userAgent: req.headers['user-agent'] })
     await audit({ action: 'admin.totp_enrolled', adminId: admin.id, ip: req.ip })
     return { admin: { id: admin.id, email: admin.email, role: admin.role } }
-  })
-
-  /** Resetting someone else's 2FA is a superadmin action and is logged. */
-  app.post<{ Params: { id: string } }>('/operators/:id/reset-totp', async (req) => {
-    const actor = await requireOperator(req, 'system:write')
-    const target = await prisma.adminUser.update({
-      where: { id: req.params.id },
-      data: { totpSecret: null, totpEnabled: false },
-    })
-    await audit({
-      action: 'admin.totp_reset',
-      adminId: actor.id,
-      payload: { target: target.email },
-      ip: req.ip,
-    })
-    return { ok: true }
   })
 
   app.post('/auth/logout', async (req, reply) => {
