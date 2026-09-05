@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — Mailkong</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📮</text></svg>">
+</head>
+<body>
+<header class="site"><div class="wrap">
+  <a class="logo" href="/"><span class="mark">✦</span> Mailkong</a>
+  <nav class="main"><a href="/pricing.html">Pricing</a><a href="https://app.mailkong.net/login">Sign in</a></nav>
+</div></header>
+
+<section><div class="wrap narrow">
+  <h1 style="font-size:2rem">Privacy</h1>
+
+  <div style="background:var(--warn-wash,#fffbeb);border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin:20px 0;font-size:.9375rem;color:#92400e">
+    <strong>Draft — not legal advice.</strong> This describes what the platform actually
+    stores and for how long, which is the hard part. Have a lawyer confirm the wording and
+    your obligations under GDPR, CCPA or whatever applies to you.
+  </div>
+
+  <h2 style="font-size:1.25rem;margin-top:32px">Who is responsible for what</h2>
+  <p>For your <strong>account</strong> — your name, email, billing details — we are the data controller.</p>
+  <p>For the <strong>messages you send</strong>, including your recipients' addresses and message content, you are the controller and we are your processor. We handle that data only to deliver it and to give you the delivery records you asked for.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">What we store, and for how long</h2>
+  <table style="font-size:.9375rem;width:100%;border-collapse:collapse;margin:16px 0">
+    <thead><tr style="text-align:left;border-bottom:1px solid var(--line)"><th style="padding:9px 0">Data</th><th>Retention</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr style="border-bottom:1px solid var(--line)"><td style="padding:9px 0">Message content and headers</td><td>7, 30 or 90 days by plan</td><td>Delivery, and your Activity log</td></tr>
+      <tr style="border-bottom:1px solid var(--line)"><td style="padding:9px 0">Delivery metadata</td><td>Same as above</td><td>Bounce diagnosis</td></tr>
+      <tr style="border-bottom:1px solid var(--line)"><td style="padding:9px 0">Suppression list</td><td>Until you remove an entry</td><td>Prevents re-mailing addresses that rejected you</td></tr>
+      <tr style="border-bottom:1px solid var(--line)"><td style="padding:9px 0">Account and team records</td><td>Life of the account, then 90 days</td><td>Operating your account</td></tr>
+      <tr style="border-bottom:1px solid var(--line)"><td style="padding:9px 0">Invoices</td><td>7 years</td><td>Financial record-keeping obligations</td></tr>
+      <tr style="border-bottom:1px solid var(--line)"><td style="padding:9px 0">Audit log</td><td>Retained</td><td>Security and abuse investigation</td></tr>
+      <tr><td style="padding:9px 0">Abuse reports</td><td>Retained</td><td>Handling complaints and repeat offenders</td></tr>
+    </tbody>
+  </table>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">Who we share it with</h2>
+  <p>Only the processors needed to run the service: our hosting provider, and Stripe for payments. Card details go directly to Stripe and never reach our servers. We do not sell data and we do not use your message content for anything other than delivering it.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">Tracking</h2>
+  <p>Open and click tracking is <strong>off by default</strong> and enabled per sending server by you. When it is on, we record that a message was opened or a link clicked, with the IP address and user agent that did it. If you enable it, that is your decision as controller and your privacy notice should say so.</p>
+  <p>The marketing site and dashboard use no third-party analytics and set no advertising cookies. The dashboard sets one session cookie, which is required for you to stay signed in.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">Security</h2>
+  <p>Passwords and API keys are stored as Argon2id hashes and cannot be recovered — only reset or reissued. Credentials we must present to the mail engine are encrypted at rest with AES-256-GCM. Access to production is restricted to allowlisted networks with mandatory two-factor authentication, and every operator action is written to an immutable audit log.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">Your rights</h2>
+  <p>You can export your suppression list and message history from the dashboard and API at any time. For access, correction or deletion of account data, or for a data processing agreement, write to <a href="mailto:privacy@mailkong.net">privacy@mailkong.net</a>. Requests about a <em>recipient's</em> data should go to whoever sent them the mail — we hold it on their behalf, and will forward your request to them.</p>
+
+  <p style="margin-top:32px;color:var(--ink-3);font-size:.875rem">Contact: <a href="mailto:privacy@mailkong.net">privacy@mailkong.net</a></p>
+</div></section>
+
+<footer class="site"><div class="wrap"><div class="legal" style="border-top:none;padding-top:0">
+  <span>© <span id="yr">2026</span> Mailkong.</span>
+  <span><a href="/">Home</a> · <a href="/terms.html">Terms</a> · <a href="/acceptable-use.html">Acceptable use</a></span>
+</div></div></footer>
+<script>document.getElementById('yr').textContent=new Date().getFullYear()</script>
+</body>
+</html>

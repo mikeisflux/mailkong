@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # The integration tests run against real Postgres and Redis rather than
+    # mocks, because the things worth testing here -- atomic quota
+    # reservation, cascade behaviour, unique constraints -- are exactly the
+    # things a mock would paper over.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: mailkong
+          POSTGRES_PASSWORD: mailkong
+          POSTGRES_DB: mailkong
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U mailkong"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://mailkong:mailkong@localhost:5432/mailkong
+      REDIS_URL: redis://localhost:6379
+      APP_URL: https://app.mailkong.net
+      ADMIN_URL: https://admin.mailkong.net
+      API_URL: https://api.mailkong.net
+      PLATFORM_DOMAIN: mailkong.net
+      SESSION_SECRET: ci-session-secret-at-least-32-characters-long
+      ENCRYPTION_KEY: ci-encryption-key-at-least-32-chars
+      POSTAL_API_URL: https://postal.mailkong.net
+      POSTAL_SMTP_HOST: smtp.mailkong.net
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npm run db:seed
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+  web:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [dashboard, admin]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/${{ matrix.app }}/package-lock.json
+      - run: npm ci
+        working-directory: web/${{ matrix.app }}
+      - run: npm run build
+        working-directory: web/${{ matrix.app }}
+
+  spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Lint the OpenAPI description
+        run: npx @redocly/cli@latest lint docs/openapi.yaml

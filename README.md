@@ -35,11 +35,15 @@ Internet / customer apps
 | `src/postal/` | Postal clients — send API, and the provisioning agent |
 | `src/services/` | The rules: quotas, domains, send pipeline, events |
 | `src/jobs/` | DNS sweep, webhook delivery, usage, policy, retention |
+| `src/mail/` | Platform's own email — sent through the internal tenant |
 | `web/site/` | Marketing site (static HTML) |
+| `web/docs/` | Documentation + API reference |
+| `web/status/` | Status page (self-contained, host it elsewhere) |
 | `web/dashboard/` | Customer dashboard (React) |
 | `web/admin/` | Admin console (React) |
 | `infra/postal-agent/` | Provisioning agent that runs on Box B |
 | `infra/dns/` | Platform DNS zone |
+| `infra/scripts/` | Backup and restore |
 | `docs/` | Infrastructure decisions, runbook, OpenAPI |
 
 ## Running it locally
@@ -61,9 +65,10 @@ npm --prefix web/admin run dev         # admin           :5174
 The dev fixture signs in as `dev@mailkong.net` / `devpassword1234`.
 
 ```bash
-npm test          # 30 tests, including the send pipeline against real
-                  # Postgres and Redis with Postal stubbed
+npm test          # 43 tests: the send pipeline and every auth token flow,
+                  # against real Postgres and Redis with Postal stubbed
 npm run typecheck
+npm run docs:api  # regenerate web/docs/openapi.json from docs/openapi.yaml
 ```
 
 ## The one thing to know before reading the code
@@ -104,6 +109,17 @@ without which nothing ever leaves `queued`.
 | `docs/openapi.yaml` | Public API reference |
 | `infra/postal-agent/README.md` | Why the agent exists and how to install it |
 
+## The internal tenant is load-bearing
+
+The platform sends its own email — verification, invites, resets, and every
+alert — through the `internal` tenant's Postal server. That is spec 14's point:
+our mail travels the path our customers' does, so an outage here is one we feel
+before they report it.
+
+Until that tenant exists and has a verified domain, platform email is logged
+rather than sent. Signup still works; the confirmation email just does not
+arrive. **Finish step 10 of the Phase 0 runbook before onboarding anyone.**
+
 ## Status
 
 Phases 0–3 of the spec are implemented. Before public signup:
@@ -111,5 +127,8 @@ Phases 0–3 of the spec are implemented. Before public signup:
 - [ ] OVH port 25 request answered
 - [ ] Both boxes provisioned per the runbook
 - [ ] Internal tenant sending real mail with SPF, DKIM and DMARC passing
-- [ ] Stripe products created and price IDs set on plans
+- [ ] An operator has enrolled TOTP at `admin.mailkong.net`
+- [ ] Stripe products created and `stripe_price_id` set on each plan
+- [ ] `BACKUP_REMOTE` configured, and a restore rehearsed
+- [ ] Terms and privacy pages reviewed by a lawyer
 - [ ] `signup_open` still off until pause and search are exercised in anger

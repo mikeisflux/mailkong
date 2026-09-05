@@ -17,7 +17,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
-    "test": "tsx --test src/__tests__/*.test.ts"
+    "test": "tsx --test src/__tests__/*.test.ts",
+    "docs:api": "node -e \"const y=require('js-yaml'),f=require('fs');f.writeFileSync('web/docs/openapi.json',JSON.stringify(y.load(f.readFileSync('docs/openapi.yaml','utf8')),null,2))\""
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
@@ -40,6 +41,7 @@
     "@types/node": "^22.10.7",
     "prisma": "^6.3.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "js-yaml": "^4.1.0"
   }
 }

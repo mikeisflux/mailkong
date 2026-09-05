@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mailkong Documentation</title>
+<meta name="description" content="Verify a domain, send over SMTP or the HTTP API, handle webhooks and inbound routes.">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📮</text></svg>">
+<style>
+.docs { display: grid; grid-template-columns: 216px 1fr; gap: 44px; max-width: 1060px; margin: 0 auto; padding: 32px 24px 80px; }
+@media (max-width: 860px) { .docs { grid-template-columns: 1fr; gap: 24px; } .docs-nav { position: static; } }
+.docs-nav { position: sticky; top: 84px; align-self: start; font-size: .9375rem; }
+.docs-nav h4 { font-size: .6875rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); margin: 20px 0 8px; }
+.docs-nav h4:first-child { margin-top: 0; }
+.docs-nav a { display: block; padding: 4px 0; color: var(--ink-2); }
+.docs-nav a:hover { color: var(--brand); text-decoration: none; }
+.docs-body h2 { margin-top: 44px; scroll-margin-top: 84px; padding-top: 4px; }
+.docs-body h2:first-child { margin-top: 0; }
+.docs-body h3 { margin-top: 26px; font-size: 1rem; scroll-margin-top: 84px; }
+.docs-body pre { background: var(--bg-3); border: 1px solid var(--line); border-radius: 10px; padding: 15px 17px; overflow-x: auto; font-family: var(--mono); font-size: .8125rem; line-height: 1.6; }
+.docs-body code { background: var(--bg-3); padding: 1px 5px; border-radius: 4px; font-size: .875em; }
+.docs-body pre code { background: none; padding: 0; }
+.docs-body table { font-size: .9375rem; }
+.note { border-left: 3px solid var(--brand); background: var(--brand-wash); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0; font-size: .9375rem; }
+.warn { border-left: 3px solid var(--accent); background: #fffbeb; padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0; font-size: .9375rem; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .warn { background: #2b1f0a; } }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="logo" href="/"><span class="mark">✦</span> Mailkong</a>
+    <nav class="main">
+      <a href="/pricing.html" class="hide-sm">Pricing</a>
+      <a href="/docs/">Docs</a>
+      <a href="https://app.mailkong.net/login">Sign in</a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs">
+  <nav class="docs-nav">
+    <h4>Getting started</h4>
+    <a href="#verify">Verify a domain</a>
+    <a href="#smtp">Send via SMTP</a>
+    <a href="#api">Send via the API</a>
+    <h4>Going further</h4>
+    <a href="#webhooks">Webhooks &amp; signatures</a>
+    <a href="#inbound">Inbound routes</a>
+    <a href="#suppressions">Suppressions</a>
+    <h4>Troubleshooting</h4>
+    <a href="#deferred">Why mail is deferred</a>
+    <a href="#errors">Error codes</a>
+    <h4>Reference</h4>
+    <a href="/docs/api.html">Full API reference</a>
+  </nav>
+
+  <main class="docs-body">
+    <h1 style="margin-bottom:8px">Documentation</h1>
+    <p class="muted" style="color:var(--ink-3)">Six short pages. Start at the top.</p>
+
+    <h2 id="verify">Verify a domain</h2>
+    <p>
+      You cannot send from a domain until it passes SPF and DKIM. This is not us being
+      strict — mail from an unverified domain is rejected or filtered by the receiving
+      server, so sending it would just burn your reputation.
+    </p>
+    <ol>
+      <li>In your dashboard, go to <strong>Domains → Add domain</strong> and enter the domain your mail comes from, e.g. <code>yourshop.com</code>.</li>
+      <li>We generate a DKIM keypair and show you the exact records to publish.</li>
+      <li>Add them at your DNS provider. SPF and DKIM are required; DMARC and the return path are recommended.</li>
+      <li>Press <strong>Recheck</strong>. We also re-check every two minutes on our own.</li>
+    </ol>
+
+    <div class="note">
+      <strong>This does not touch your MX records.</strong> Your inbox — Google Workspace,
+      Microsoft 365, whatever you use — keeps working exactly as it does now.
+    </div>
+
+    <h3>Typical records</h3>
+    <table>
+      <thead><tr><th>Type</th><th>Name</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td>TXT</td><td><code>yourshop.com</code></td><td>SPF — authorises our IPs to send as you</td></tr>
+        <tr><td>TXT</td><td><code>postal._domainkey.yourshop.com</code></td><td>DKIM — the public key for our signature</td></tr>
+        <tr><td>TXT</td><td><code>_dmarc.yourshop.com</code></td><td>DMARC — tells receivers what to do with failures</td></tr>
+        <tr><td>CNAME</td><td><code>psrp.yourshop.com</code></td><td>Return path — where bounces are collected</td></tr>
+      </tbody>
+    </table>
+
+    <div class="warn">
+      <strong>Already have an SPF record?</strong> You may only have one. Merge ours into it
+      rather than adding a second — two SPF records is a permanent error, and receivers will
+      treat every message as unauthenticated.
+    </div>
+
+    <h2 id="smtp">Send via SMTP</h2>
+    <p>Anything that already sends email can point at us with no code changes.</p>
+    <table>
+      <tbody>
+        <tr><td>Host</td><td><code>smtp.mailkong.net</code></td></tr>
+        <tr><td>Port</td><td><code>587</code></td></tr>
+        <tr><td>Security</td><td>STARTTLS</td></tr>
+        <tr><td>Username</td><td>From <strong>Credentials → New SMTP user</strong></td></tr>
+        <tr><td>Password</td><td>Shown once when you create it</td></tr>
+      </tbody>
+    </table>
+
+    <div class="warn">
+      Use port <strong>587</strong>, not 25. Port 25 is for server-to-server delivery and is
+      blocked outbound by most networks and hosting providers.
+    </div>
+
+    <pre><code># Nodemailer
+const transport = nodemailer.createTransport({
+  host: 'smtp.mailkong.net',
+  port: 587,
+  secure: false,        // STARTTLS is negotiated after connecting
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+})</code></pre>
+
+    <h2 id="api">Send via the HTTP API</h2>
+    <p>Create an API key under <strong>Credentials</strong>. It is shown once.</p>
+
+    <pre><code>curl https://api.mailkong.net/v1/messages \
+  -H "Authorization: Bearer pk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "Billing &lt;billing@yourshop.com&gt;",
+    "to": ["customer@example.org"],
+    "subject": "Your receipt",
+    "html": "&lt;p&gt;Thanks for your order.&lt;/p&gt;",
+    "text": "Thanks for your order.",
+    "tag": "receipt",
+    "metadata": { "order_id": "4821" }
+  }'</code></pre>
+
+    <pre><code>{ "id": "cm4x9k2p0000abcd", "status": "queued", "suppressed": [] }</code></pre>
+
+    <p>
+      Always send <code>text</code> alongside <code>html</code>. A message with no plain-text
+      part is a well-known spam signal, and it is the single cheapest thing you can do for
+      deliverability.
+    </p>
+
+    <h3>Tags and metadata</h3>
+    <p>
+      <code>tag</code> is a label you filter Activity by — <code>receipt</code>,
+      <code>password-reset</code>. <code>metadata</code> is an arbitrary object returned
+      unchanged on the message and on every webhook about it, which is how you tie a delivery
+      event back to your own records without a lookup table.
+    </p>
+
+    <h3>Suppressed recipients</h3>
+    <p>
+      Recipients on your suppression list are dropped rather than failing the whole call, and
+      returned in <code>suppressed</code>. If every recipient is suppressed, the call fails
+      with <code>all_recipients_suppressed</code>.
+    </p>
+
+    <h2 id="webhooks">Webhooks and signatures</h2>
+    <p>Add an endpoint under <strong>Webhooks</strong> and choose your events:</p>
+    <table>
+      <tbody>
+        <tr><td><code>message.sending</code></td><td>Accepted and queued</td></tr>
+        <tr><td><code>message.delivered</code></td><td>The receiving server accepted it</td></tr>
+        <tr><td><code>message.bounced</code></td><td>Permanently rejected; the address is now suppressed</td></tr>
+        <tr><td><code>message.failed</code></td><td>Could not be delivered</td></tr>
+        <tr><td><code>message.opened</code></td><td>Requires tracking enabled</td></tr>
+        <tr><td><code>message.clicked</code></td><td>Requires tracking enabled</td></tr>
+        <tr><td><code>inbound.message</code></td><td>Mail arrived on one of your routes</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Verifying a delivery</h3>
+    <p>
+      Every request carries <code>X-Mail-Timestamp</code> and <code>X-Mail-Signature</code>.
+      The signature is <code>HMAC-SHA256(secret, "&lt;timestamp&gt;.&lt;raw body&gt;")</code>,
+      hex encoded.
+    </p>
+
+    <pre><code>import crypto from 'node:crypto'
+
+app.post('/hooks/mail', express.raw({ type: 'application/json' }), (req, res) =&gt; {
+  const timestamp = req.headers['x-mail-timestamp']
+  const signature = req.headers['x-mail-signature']
+
+  // Reject anything older than five minutes so a captured payload
+  // cannot be replayed indefinitely.
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) &gt; 300) {
+    return res.sendStatus(400)
+  }
+
+  const expected = crypto
+    .createHmac('sha256', process.env.MAILKONG_WEBHOOK_SECRET)
+    .update(`${timestamp}.${req.body}`)
+    .digest('hex')
+
+  if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature))) {
+    return res.sendStatus(401)
+  }
+
+  const event = JSON.parse(req.body)
+  res.sendStatus(200)          // respond fast; do the work afterwards
+})</code></pre>
+
+    <div class="warn">
+      Sign the <strong>raw body</strong>, before any JSON parsing. Parsing and re-serialising
+      changes the bytes and the signature will never match.
+    </div>
+
+    <h3>Retries</h3>
+    <p>
+      Any non-2xx response is retried five times with exponential backoff, over roughly ten
+      minutes. After 50 consecutive failures the endpoint is disabled and you are emailed.
+      Respond <code>200</code> as soon as you have the payload and process it asynchronously.
+    </p>
+
+    <h2 id="inbound">Inbound routes</h2>
+    <p>Turn replies into webhooks instead of a mailbox nobody reads.</p>
+    <ol>
+      <li>Add an MX record: <code>inbound.yourshop.com</code> → <code>routes.mailkong.net</code>, priority 10.</li>
+      <li>Create a route under <strong>Inbound</strong>: an address (<code>support</code>, or <code>*</code> for a catch-all), the domain, and your endpoint URL.</li>
+    </ol>
+    <p>Mail arriving there is parsed and POSTed as JSON, signed exactly like any other webhook:</p>
+    <pre><code>{
+  "event": "inbound.message",
+  "data": {
+    "from": "customer@example.org",
+    "to": "support@inbound.yourshop.com",
+    "subject": "Re: Your receipt",
+    "text": "Can I change the shipping address?",
+    "html": "&lt;p&gt;Can I change the shipping address?&lt;/p&gt;",
+    "headers": { "message-id": "..." },
+    "attachments": [],
+    "spam_score": 0.4
+  }
+}</code></pre>
+
+    <h2 id="suppressions">Suppressions</h2>
+    <p>
+      Hard bounces and spam complaints are added to your suppression list automatically and
+      blocked on the next send. This is not optional and it is not configurable — repeatedly
+      mailing addresses that have already rejected you is the fastest way to get an entire
+      sending pool blocked.
+    </p>
+    <p>
+      You can add addresses manually, remove ones you believe are wrong, and export the list
+      as CSV. Platform-wide suppressions are marked as such and cannot be removed from your
+      account; contact support if you think one is a mistake.
+    </p>
+
+    <h2 id="deferred">Why mail is deferred or refused</h2>
+    <p>In rough order of how often it happens:</p>
+    <table>
+      <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr><td><code>domain_not_verified</code></td><td>SPF or DKIM is not passing</td><td>Check Domains; press Recheck after publishing</td></tr>
+        <tr><td><code>domain_not_added</code></td><td>The From domain is not on this account</td><td>Add it, or correct the From address</td></tr>
+        <tr><td><code>daily_cap_reached</code></td><td>New accounts start with a low daily cap</td><td>It rises automatically after a clean week</td></tr>
+        <tr><td><code>plan_cap_reached</code></td><td>Monthly allowance exhausted</td><td>Upgrade, or wait for the period to reset</td></tr>
+        <tr><td><code>account_paused</code></td><td>Bounce or complaint rate crossed the threshold</td><td>The reason is in your dashboard; reply to the alert email</td></tr>
+        <tr><td><code>past_due</code></td><td>A payment failed</td><td>Update your card in Usage &amp; billing</td></tr>
+        <tr><td>Delivered but in spam</td><td>Usually no plain-text part, or no DMARC</td><td>Send <code>text</code> as well as <code>html</code>; publish DMARC</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="errors">Error format</h2>
+    <p>
+      Branch on <code>code</code>, never on <code>message</code> — messages are written for
+      humans and will change.
+    </p>
+    <pre><code>{
+  "error": {
+    "code": "domain_not_verified",
+    "message": "yourshop.com has not passed SPF and DKIM checks yet.",
+    "detail": { "spf": true, "dkim": false, "dmarc": false }
+  }
+}</code></pre>
+    <table>
+      <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>401</code></td><td>Missing or invalid API key</td></tr>
+        <tr><td><code>402</code></td><td>A plan or quota condition — reserved for this, so you can distinguish it from a permissions problem</td></tr>
+        <tr><td><code>403</code></td><td>Account paused, disabled, or awaiting domain verification</td></tr>
+        <tr><td><code>422</code></td><td>The request body failed validation; <code>detail</code> lists the fields</td></tr>
+        <tr><td><code>429</code></td><td>Rate limited — back off and retry</td></tr>
+        <tr><td><code>500</code></td><td>Our fault. <code>request_id</code> is what support needs.</td></tr>
+      </tbody>
+    </table>
+
+    <p style="margin-top:40px">
+      <a href="/docs/api.html">Full API reference →</a>
+    </p>
+  </main>
+</div>
+
+<footer class="site">
+  <div class="wrap"><div class="legal" style="border-top:none;padding-top:0">
+    <span>© <span id="yr">2026</span> Mailkong.</span>
+    <span><a href="/">Home</a> · <a href="/pricing.html">Pricing</a> · <a href="https://status.mailkong.net">Status</a></span>
+  </div></div>
+</footer>
+<script>document.getElementById('yr').textContent = new Date().getFullYear()</script>
+</body>
+</html>

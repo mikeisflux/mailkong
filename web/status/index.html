@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mailkong Status</title>
+<meta name="description" content="Live operational status for the Mailkong platform.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📮</text></svg>">
+<style>
+/* Self-contained on purpose. A status page that loads a stylesheet from the
+   platform it reports on is broken exactly when it is needed. Host it
+   somewhere other than Box A too -- see docs/infrastructure.md. */
+:root{color-scheme:light;--ink:#0d1117;--ink-2:#3d4a5c;--ink-3:#6b7a8d;--line:#e3e8ef;--bg:#fff;--bg-2:#f7f9fb;--ok:#047857;--ok-wash:#ecfdf5;--warn:#b45309;--warn-wash:#fffbeb;--err:#b91c1c;--err-wash:#fef2f2}
+@media (prefers-color-scheme:dark){:root{color-scheme:dark;--ink:#e6edf3;--ink-2:#aebac8;--ink-3:#7d8b9c;--line:#22303f;--bg:#0b1017;--bg-2:#10161f;--ok:#4ade80;--ok-wash:#0d2a1c;--warn:#f0b357;--warn-wash:#2b1f0a;--err:#f87171;--err-wash:#2b1213}}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink-2);background:var(--bg-2);-webkit-font-smoothing:antialiased}
+.wrap{max-width:760px;margin:0 auto;padding:40px 24px 64px}
+h1{font-size:1.5rem;color:var(--ink);margin:0 0 6px;letter-spacing:-.02em}
+h2{font-size:.9375rem;color:var(--ink);margin:32px 0 12px}
+a{color:inherit}
+.overall{border-radius:12px;padding:20px 22px;margin:22px 0 8px;border:1px solid;display:flex;align-items:center;gap:14px}
+.overall.ok{background:var(--ok-wash);border-color:color-mix(in srgb,var(--ok) 30%,transparent);color:var(--ok)}
+.overall.warn{background:var(--warn-wash);border-color:color-mix(in srgb,var(--warn) 30%,transparent);color:var(--warn)}
+.overall.err{background:var(--err-wash);border-color:color-mix(in srgb,var(--err) 30%,transparent);color:var(--err)}
+.overall .dot{width:11px;height:11px;border-radius:50%;background:currentColor;flex-shrink:0}
+.overall strong{font-size:1.0625rem}
+.card{background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.svc{display:flex;align-items:center;gap:12px;padding:13px 18px;border-bottom:1px solid var(--line)}
+.svc:last-child{border-bottom:none}
+.svc .name{color:var(--ink);font-weight:550}
+.svc .desc{font-size:.8125rem;color:var(--ink-3)}
+.svc .state{margin-left:auto;font-size:.8125rem;font-weight:650;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.svc .state::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.state.ok{color:var(--ok)}.state.warn{color:var(--warn)}.state.err{color:var(--err)}.state.unknown{color:var(--ink-3)}
+.muted{color:var(--ink-3);font-size:.875rem}
+footer{margin-top:36px;padding-top:20px;border-top:1px solid var(--line);font-size:.8125rem;color:var(--ink-3);display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Mailkong status</h1>
+  <p class="muted" style="margin:0">Checked live from your browser, every 60 seconds.</p>
+
+  <div class="overall unknown" id="overall">
+    <span class="dot"></span>
+    <div><strong id="overall-text">Checking…</strong></div>
+  </div>
+
+  <div class="card" id="services">
+    <div class="svc">
+      <div>
+        <div class="name">Sending API</div>
+        <div class="desc">api.mailkong.net — accepting and queueing messages</div>
+      </div>
+      <div class="state unknown" data-check="api">Checking</div>
+    </div>
+    <div class="svc">
+      <div>
+        <div class="name">Customer dashboard</div>
+        <div class="desc">app.mailkong.net</div>
+      </div>
+      <div class="state unknown" data-check="app">Checking</div>
+    </div>
+    <div class="svc">
+      <div>
+        <div class="name">Database</div>
+        <div class="desc">Account, domain and message index storage</div>
+      </div>
+      <div class="state unknown" data-check="db">Checking</div>
+    </div>
+    <div class="svc">
+      <div>
+        <div class="name">Queue</div>
+        <div class="desc">Webhook delivery and background processing</div>
+      </div>
+      <div class="state unknown" data-check="redis">Checking</div>
+    </div>
+  </div>
+
+  <h2>Incidents</h2>
+  <div class="card">
+    <div class="svc">
+      <div>
+        <div class="name" id="incident-title">No incidents reported</div>
+        <div class="desc" id="incident-body">
+          Ongoing incidents are posted here. Nothing is currently open.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>What each check means</h2>
+  <p class="muted" style="margin-top:0">
+    This page calls the platform's public health endpoint directly from your browser,
+    so it reflects what you would experience, not what our monitoring believes. If the
+    page itself loads but every check fails, the platform is down rather than your
+    connection — this page is hosted separately.
+  </p>
+
+  <footer>
+    <span>Last checked <span id="checked">never</span></span>
+    <span><a href="https://mailkong.net">Home</a> · <a href="mailto:support@mailkong.net">Support</a></span>
+  </footer>
+</div>
+
+<script>
+const HEALTH = 'https://api.mailkong.net/health'
+
+function paint(el, state, label) {
+  el.className = 'state ' + state
+  el.textContent = label
+}
+
+async function check() {
+  const cells = Object.fromEntries(
+    [...document.querySelectorAll('[data-check]')].map(el => [el.dataset.check, el]),
+  )
+  let health = null
+
+  try {
+    const res = await fetch(HEALTH, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+    health = await res.json()
+  } catch {
+    health = null
+  }
+
+  if (!health) {
+    for (const el of Object.values(cells)) paint(el, 'err', 'Unreachable')
+    setOverall('err', 'Platform unreachable')
+  } else {
+    paint(cells.api, health.ok ? 'ok' : 'err', health.ok ? 'Operational' : 'Degraded')
+    paint(cells.db, health.db ? 'ok' : 'err', health.db ? 'Operational' : 'Down')
+    paint(cells.redis, health.redis ? 'ok' : 'err', health.redis ? 'Operational' : 'Down')
+
+    // The dashboard is a static bundle, so it keeps loading even when the
+    // platform behind it does not. Reporting that as "Operational" would be
+    // technically true and useless: without the database it can show a
+    // customer nothing. Tie it to what it actually depends on.
+    paint(
+      cells.app,
+      health.db ? 'ok' : 'warn',
+      health.db ? 'Operational' : 'Loads, but data unavailable',
+    )
+
+    const down = [health.ok, health.db, health.redis].filter(v => !v).length
+    if (down === 0) setOverall('ok', 'All systems operational')
+    else if (down === 1) setOverall('warn', 'Partial degradation')
+    else setOverall('err', 'Major outage')
+  }
+
+  document.getElementById('checked').textContent = new Date().toLocaleTimeString()
+}
+
+function setOverall(state, text) {
+  const el = document.getElementById('overall')
+  el.className = 'overall ' + state
+  document.getElementById('overall-text').textContent = text
+}
+
+check()
+setInterval(check, 60000)
+</script>
+</body>
+</html>

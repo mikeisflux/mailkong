@@ -1,0 +1,1101 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Mailkong API",
+    "version": "1.0.0",
+    "description": "Transactional email API.\n\n## Authentication\n\nEvery request carries an API key as a bearer token:\n\n    Authorization: Bearer pk_live_...\n\nKeys are shown once at creation and cannot be retrieved afterwards.\nRevoke and replace a key you have lost.\n\n## Errors\n\nFailures return a consistent envelope. Branch on `code`, not on `message` —\nmessages are written for humans and may change.\n\n    {\n      \"error\": {\n        \"code\": \"domain_not_verified\",\n        \"message\": \"shop.com has not passed SPF and DKIM checks yet.\",\n        \"detail\": { \"spf\": true, \"dkim\": false, \"dmarc\": false }\n      }\n    }\n\n`402` is reserved for plan and quota conditions, so your client can tell\n\"you have hit your cap\" apart from \"you are not allowed to do this\".\n",
+    "contact": {
+      "email": "support@mailkong.net"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.mailkong.net/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Messages"
+    },
+    {
+      "name": "Domains"
+    },
+    {
+      "name": "Credentials"
+    },
+    {
+      "name": "Webhooks"
+    },
+    {
+      "name": "Routes"
+    },
+    {
+      "name": "Suppressions"
+    },
+    {
+      "name": "Usage"
+    }
+  ],
+  "paths": {
+    "/messages": {
+      "post": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Send a message",
+        "description": "Before anything reaches the mail engine the request is checked in\norder: account status, plan and daily cap, that the From domain is\nverified, and that recipients are not suppressed.\n\nSuppressed recipients are dropped rather than failing the whole call,\nand returned in `suppressed`. If every recipient is suppressed the\ncall fails with `all_recipients_suppressed`.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendRequest"
+              },
+              "examples": {
+                "receipt": {
+                  "summary": "A receipt",
+                  "value": {
+                    "from": "Billing <billing@shop.com>",
+                    "to": [
+                      "user@example.org"
+                    ],
+                    "subject": "Your receipt",
+                    "html": "<p>Thanks</p>",
+                    "text": "Thanks",
+                    "tag": "receipt",
+                    "metadata": {
+                      "order_id": "123"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted and queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "example": "cm4x9k2p0000abcd"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "queued"
+                      ]
+                    },
+                    "suppressed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "email"
+                      },
+                      "description": "Recipients dropped because they are suppressed."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan or daily cap reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Account paused, disabled, or awaiting domain verification"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "List messages",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "queued",
+                "pending",
+                "sent",
+                "delivered",
+                "bounced",
+                "failed",
+                "held"
+              ]
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from_date",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to_date",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Message"
+                      }
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/messages/{id}": {
+      "get": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Retrieve a message",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or pruned past your retention limit"
+          }
+        }
+      }
+    },
+    "/messages/{id}/retry": {
+      "post": {
+        "tags": [
+          "Messages"
+        ],
+        "summary": "Retry a message",
+        "description": "Sends the same envelope again. This is a fresh send, not a mail-engine\nrequeue — caps and suppressions are re-evaluated, so a recipient\nsuppressed since the original attempt will not be retried.\n",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Queued again"
+          }
+        }
+      }
+    },
+    "/domains": {
+      "get": {
+        "tags": [
+          "Domains"
+        ],
+        "summary": "List domains",
+        "responses": {
+          "200": {
+            "description": "Your domains",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Domain"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Domains"
+        ],
+        "summary": "Add a domain",
+        "description": "Returns the DNS records to publish. The DKIM keypair is generated by\nthe mail engine — never construct these values yourself.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "shop.com"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "sending",
+                      "tracking",
+                      "inbound"
+                    ],
+                    "default": "sending"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created, with DNS records to publish"
+          },
+          "409": {
+            "description": "Already added, or plan domain limit reached"
+          }
+        }
+      }
+    },
+    "/domains/{id}/verify": {
+      "post": {
+        "tags": [
+          "Domains"
+        ],
+        "summary": "Re-check a domain's DNS",
+        "description": "A domain can send once SPF and DKIM both pass. DMARC and the return\npath are reported but not required.\n\nRecords are also re-checked automatically every couple of minutes, so\ncalling this in a loop is unnecessary.\n",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current verification state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Domain"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/domains/{id}": {
+      "delete": {
+        "tags": [
+          "Domains"
+        ],
+        "summary": "Remove a domain",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "409": {
+            "description": "It is your only verified domain and mail is still queued"
+          }
+        }
+      }
+    },
+    "/credentials": {
+      "get": {
+        "tags": [
+          "Credentials"
+        ],
+        "summary": "List credentials",
+        "responses": {
+          "200": {
+            "description": "Your credentials, without secrets"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Credentials"
+        ],
+        "summary": "Create a credential",
+        "description": "The secret appears in this response only and is not recoverable.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "api_key",
+                      "smtp"
+                    ],
+                    "default": "api_key"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created, including the one-time secret"
+          }
+        }
+      }
+    },
+    "/credentials/{id}": {
+      "delete": {
+        "tags": [
+          "Credentials"
+        ],
+        "summary": "Revoke a credential",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked, effective immediately"
+          }
+        }
+      }
+    },
+    "/webhooks": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "List webhook endpoints",
+        "responses": {
+          "200": {
+            "description": "Your endpoints"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Create a webhook endpoint",
+        "description": "Deliveries carry `X-Mail-Timestamp` and `X-Mail-Signature`, where the\nsignature is `HMAC-SHA256(secret, \"<timestamp>.<raw body>\")` in hex.\n\nVerify in constant time, and reject a timestamp more than a few\nminutes old so a captured payload cannot be replayed.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url",
+                  "events"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Must be HTTPS."
+                  },
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "message.sending",
+                        "message.delivered",
+                        "message.bounced",
+                        "message.failed",
+                        "message.clicked",
+                        "message.opened",
+                        "inbound.message"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created, including the one-time signing secret"
+          }
+        }
+      }
+    },
+    "/webhooks/{id}": {
+      "delete": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Delete a webhook endpoint",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          }
+        }
+      }
+    },
+    "/routes": {
+      "get": {
+        "tags": [
+          "Routes"
+        ],
+        "summary": "List inbound routes",
+        "responses": {
+          "200": {
+            "description": "Your routes"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Routes"
+        ],
+        "summary": "Create an inbound route",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "address",
+                  "domain",
+                  "endpoint_url"
+                ],
+                "properties": {
+                  "address": {
+                    "type": "string",
+                    "example": "support",
+                    "description": "Local part, or * for a catch-all."
+                  },
+                  "domain": {
+                    "type": "string",
+                    "example": "inbound.shop.com"
+                  },
+                  "endpoint_url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "spam_threshold": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 20
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/routes/{id}": {
+      "delete": {
+        "tags": [
+          "Routes"
+        ],
+        "summary": "Delete an inbound route",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          }
+        }
+      }
+    },
+    "/suppressions": {
+      "get": {
+        "tags": [
+          "Suppressions"
+        ],
+        "summary": "List suppressed addresses",
+        "description": "Includes platform-wide suppressions, marked `global: true`. Those\ncannot be removed through the API.\n",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Suppressed addresses"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Suppressions"
+        ],
+        "summary": "Suppress an address",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "hard_bounce",
+                      "complaint",
+                      "manual",
+                      "unsubscribe"
+                    ],
+                    "default": "manual"
+                  },
+                  "detail": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Suppressed"
+          }
+        }
+      }
+    },
+    "/suppressions/{email}": {
+      "delete": {
+        "tags": [
+          "Suppressions"
+        ],
+        "summary": "Remove a suppression",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "404": {
+            "description": "Not suppressed, or suppressed platform-wide"
+          }
+        }
+      }
+    },
+    "/usage": {
+      "get": {
+        "tags": [
+          "Usage"
+        ],
+        "summary": "Current usage and limits",
+        "responses": {
+          "200": {
+            "description": "Plan, daily and cycle usage, and 30 days of history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "plan": {
+                      "type": "object"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "daily": {
+                      "type": "object",
+                      "properties": {
+                        "used": {
+                          "type": "integer"
+                        },
+                        "cap": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "cycle": {
+                      "type": "object",
+                      "properties": {
+                        "used": {
+                          "type": "integer"
+                        },
+                        "cap": {
+                          "type": "integer"
+                        },
+                        "ends_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "history": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Your API key, e.g. pk_live_..."
+      }
+    },
+    "schemas": {
+      "SendRequest": {
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "subject"
+        ],
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "Must be on a verified sending domain. Accepts \"Name <addr>\".",
+            "example": "Billing <billing@shop.com>"
+          },
+          "to": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "email"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "email"
+                },
+                "maxItems": 50
+              }
+            ]
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "email"
+            }
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "email"
+            }
+          },
+          "reply_to": {
+            "type": "string",
+            "format": "email"
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 998
+          },
+          "html": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string",
+            "description": "Free-form label for filtering in Activity."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Returned unchanged on the message and on every webhook for it."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "attachments": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "content_type",
+                "data"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "content_type": {
+                  "type": "string"
+                },
+                "data": {
+                  "type": "string",
+                  "description": "Base64 encoded."
+                }
+              }
+            }
+          }
+        },
+        "description": "At least one of `html` or `text` is required."
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string",
+            "format": "email"
+          },
+          "from": {
+            "type": "string"
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "pending",
+              "sent",
+              "delivered",
+              "bounced",
+              "failed",
+              "held"
+            ]
+          },
+          "tag": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "bounce_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The receiving server's verbatim response, when it rejected the message."
+          },
+          "delivered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Domain": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "sending",
+              "tracking",
+              "inbound"
+            ]
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "True once SPF and DKIM both pass. Only verified domains may send."
+          },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "spf": {
+                "type": "boolean"
+              },
+              "dkim": {
+                "type": "boolean"
+              },
+              "dmarc": {
+                "type": "boolean"
+              },
+              "return_path": {
+                "type": "boolean"
+              }
+            }
+          },
+          "dns_records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "TXT",
+                    "CNAME",
+                    "MX",
+                    "A"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "integer"
+                },
+                "purpose": {
+                  "type": "string",
+                  "enum": [
+                    "spf",
+                    "dkim",
+                    "dmarc",
+                    "return_path",
+                    "tracking",
+                    "inbound"
+                  ]
+                },
+                "required": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "last_checked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_check_output": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the last DNS check found wrong, when it failed."
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Stable machine-readable identifier. Branch on this."
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable. May change."
+              },
+              "detail": {
+                "description": "Context; shape depends on the code."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

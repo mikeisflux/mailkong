@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terms of service — Mailkong</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📮</text></svg>">
+</head>
+<body>
+<header class="site"><div class="wrap">
+  <a class="logo" href="/"><span class="mark">✦</span> Mailkong</a>
+  <nav class="main"><a href="/pricing.html">Pricing</a><a href="https://app.mailkong.net/login">Sign in</a></nav>
+</div></header>
+
+<section><div class="wrap narrow">
+  <h1 style="font-size:2rem">Terms of service</h1>
+
+  <div style="background:var(--warn-wash,#fffbeb);border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin:20px 0;font-size:.9375rem;color:#92400e">
+    <strong>Draft — not legal advice.</strong> This is a working outline covering the
+    commitments the platform actually makes and enforces in code. Have a lawyer in your
+    jurisdiction review it before you take paying customers.
+  </div>
+
+  <h2 style="font-size:1.25rem;margin-top:32px">1. The service</h2>
+  <p>Mailkong provides transactional email sending and receiving over SMTP and HTTP. You are responsible for the content you send and for the lawfulness of your relationship with every recipient.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">2. Your account</h2>
+  <p>You must give accurate registration details and keep your credentials secret. Anything sent using your API keys or SMTP credentials is your responsibility. Tell us immediately at <a href="mailto:security@mailkong.net">security@mailkong.net</a> if you believe a credential has been exposed; you can revoke any credential yourself from the dashboard, and revocation takes effect immediately.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">3. Acceptable use</h2>
+  <p>The <a href="/acceptable-use.html">acceptable use policy</a> forms part of these terms. In short: send only to people who asked to hear from you, do not send bulk marketing on the shared pool, and do not misrepresent who the sender is.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">4. Automatic enforcement</h2>
+  <p>Some limits are applied by the system without waiting for a human, because waiting would damage other customers on the same sending infrastructure:</p>
+  <ul style="font-size:.9375rem;line-height:1.8">
+    <li>You cannot send from a domain until its SPF and DKIM records verify.</li>
+    <li>New accounts have a low daily cap that rises automatically after a clean sending history.</li>
+    <li>Hard bounces and spam complaints are suppressed permanently until you remove them.</li>
+    <li>An account whose bounce or complaint rate spikes is paused pending review.</li>
+  </ul>
+  <p>A paused account keeps full dashboard access and its data. You will be able to see exactly why, and the API returns the reason to your application rather than failing silently.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">5. Fees</h2>
+  <p>Plans are billed monthly in advance through Stripe. Sending stops when you reach your plan's message allowance rather than incurring overage charges, unless you have explicitly agreed otherwise. Plan changes are prorated. Fees already paid are not refundable except where required by law.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">6. Suspension and termination</h2>
+  <p>We may pause or disable an account that breaches these terms or the acceptable use policy, that fails payment, or whose sending is damaging the deliverability of shared infrastructure. Where the situation allows it we will contact you first. You may close your account at any time from Settings.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">7. Data</h2>
+  <p>See the <a href="/privacy.html">privacy policy</a>. Message content is retained for the period your plan specifies — 7, 30 or 90 days — and then deleted. Suppression lists, account records and invoices are retained longer, because they are what prevent us re-mailing addresses that have rejected you and what we need for financial records.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">8. Availability</h2>
+  <p>We aim for high availability and publish live status at <a href="https://status.mailkong.net">status.mailkong.net</a>, but this service is provided without an uptime guarantee unless a separate written agreement says otherwise.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">9. Liability</h2>
+  <p>To the extent permitted by law, our total liability arising from the service is limited to the fees you paid in the twelve months before the claim. We are not liable for indirect or consequential loss, including lost profits or lost business.</p>
+
+  <h2 style="font-size:1.25rem;margin-top:28px">10. Changes</h2>
+  <p>We may update these terms. Material changes will be emailed to account owners at least 30 days before they take effect. Continuing to use the service after that constitutes acceptance.</p>
+
+  <p style="margin-top:32px;color:var(--ink-3);font-size:.875rem">Questions: <a href="mailto:support@mailkong.net">support@mailkong.net</a></p>
+</div></section>
+
+<footer class="site"><div class="wrap"><div class="legal" style="border-top:none;padding-top:0">
+  <span>© <span id="yr">2026</span> Mailkong.</span>
+  <span><a href="/">Home</a> · <a href="/privacy.html">Privacy</a> · <a href="/acceptable-use.html">Acceptable use</a></span>
+</div></div></footer>
+<script>document.getElementById('yr').textContent=new Date().getFullYear()</script>
+</body>
+</html>
