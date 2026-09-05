@@ -42,7 +42,12 @@ export default function Login({ onDone }: { onDone: () => Promise<void> }) {
           {busy ? 'Signing in…' : 'Sign in'}
         </Button>
 
-        <p style={{ marginTop: 18, marginBottom: 0, textAlign: 'center', fontSize: '.875rem' }}>
+        <p style={{ marginTop: 16, marginBottom: 0, textAlign: 'center', fontSize: '.875rem' }}>
+          <Link to="/forgot">Forgot your password?</Link>
+          {' · '}
+          <Link to="/magic">Email me a link</Link>
+        </p>
+        <p style={{ marginTop: 10, marginBottom: 0, textAlign: 'center', fontSize: '.875rem' }}>
           No account? <Link to="/signup">Create one</Link>
         </p>
       </form>

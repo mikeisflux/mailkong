@@ -13,6 +13,7 @@ import { suppress, unsuppress } from '../services/suppressions.js'
 import { getQuota, planLimits } from '../services/usage.js'
 import { WEBHOOK_EVENTS } from '../services/webhooks.js'
 import { audit } from '../services/audit.js'
+import { disableTenant } from '../services/provisioning.js'
 import { authRoutes } from './auth.js'
 import { checkoutRoutes } from '../billing/checkout.js'
 import { postalAdmin } from '../postal/index.js'
@@ -421,6 +422,163 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
         where: { tenantId: ctx.tenantId, acceptedAt: null },
       }),
     }
+  })
+
+  app.patch<{ Params: { tenantId: string; id: string } }>('/t/:tenantId/team/:id', async (req) => {
+    const ctx = await context(req, 'team')
+    const body = z.object({ role: z.enum(['OWNER', 'ADMIN', 'DEVELOPER', 'READ_ONLY']) }).parse(req.body)
+
+    const membership = await prisma.membership.findFirst({
+      where: { id: req.params.id, tenantId: ctx.tenantId },
+    })
+    if (!membership) throw notFound('Member')
+
+    // Only an owner may create another owner, and an organization must never
+    // be left without one -- otherwise nobody can reach billing again.
+    if (body.role === 'OWNER' && ctx.role !== 'OWNER') {
+      throw forbidden('owner_required', 'Only an owner can grant the owner role')
+    }
+    if (membership.role === 'OWNER' && body.role !== 'OWNER') {
+      const owners = await prisma.membership.count({ where: { tenantId: ctx.tenantId, role: 'OWNER' } })
+      if (owners <= 1) {
+        throw conflict('last_owner', 'Promote someone else to owner before changing this one')
+      }
+    }
+
+    const updated = await prisma.membership.update({
+      where: { id: membership.id },
+      data: { role: body.role },
+    })
+    await audit({
+      action: 'team.role_changed',
+      actorType: 'user',
+      actorId: ctx.userId,
+      tenantId: ctx.tenantId,
+      payload: { membershipId: membership.id, from: membership.role, to: body.role },
+      ip: req.ip,
+    })
+    return updated
+  })
+
+  app.delete<{ Params: { tenantId: string; id: string } }>('/t/:tenantId/team/:id', async (req, reply) => {
+    const ctx = await context(req, 'team')
+    const membership = await prisma.membership.findFirst({
+      where: { id: req.params.id, tenantId: ctx.tenantId },
+      include: { user: { select: { email: true } } },
+    })
+    if (!membership) throw notFound('Member')
+
+    if (membership.role === 'OWNER') {
+      const owners = await prisma.membership.count({ where: { tenantId: ctx.tenantId, role: 'OWNER' } })
+      if (owners <= 1) throw conflict('last_owner', 'An organization must always have an owner')
+    }
+
+    await prisma.$transaction([
+      prisma.membership.delete({ where: { id: membership.id } }),
+      // Their session for this org must not survive removal.
+      prisma.session.deleteMany({ where: { userId: membership.userId } }),
+    ])
+    await audit({
+      action: 'team.member_removed',
+      actorType: 'user',
+      actorId: ctx.userId,
+      tenantId: ctx.tenantId,
+      payload: { email: membership.user.email },
+      ip: req.ip,
+    })
+    reply.code(204)
+  })
+
+  app.delete<{ Params: { tenantId: string; id: string } }>('/t/:tenantId/team/invites/:id', async (req, reply) => {
+    const ctx = await context(req, 'team')
+    const { count } = await prisma.invite.deleteMany({
+      where: { id: req.params.id, tenantId: ctx.tenantId, acceptedAt: null },
+    })
+    if (count === 0) throw notFound('Invite')
+    reply.code(204)
+  })
+
+  // ----------------------------------------------------------- org settings
+
+  app.get('/t/:tenantId/settings', async (req) => {
+    const ctx = await context(req, 'activity')
+    const tenant = await prisma.tenant.findUniqueOrThrow({
+      where: { id: ctx.tenantId },
+      include: { notificationPrefs: true },
+    })
+    return {
+      name: tenant.name,
+      slug: tenant.slug,
+      timezone: tenant.timezone,
+      status: tenant.status,
+      created_at: tenant.createdAt,
+      notifications: tenant.notificationPrefs,
+      your_role: ctx.role,
+    }
+  })
+
+  app.patch('/t/:tenantId/settings', async (req) => {
+    const ctx = await context(req, 'settings')
+    const body = z.object({
+      name: z.string().min(1).max(80).optional(),
+      timezone: z.string().max(64).optional(),
+      notifications: z.object({
+        emails: z.array(z.string().email()).max(10).optional(),
+        bounceSpike: z.boolean().optional(),
+        capWarning: z.boolean().optional(),
+        webhookDown: z.boolean().optional(),
+        invoiceFailed: z.boolean().optional(),
+      }).optional(),
+    }).parse(req.body)
+
+    if (body.name || body.timezone) {
+      await prisma.tenant.update({
+        where: { id: ctx.tenantId },
+        data: {
+          ...(body.name ? { name: body.name } : {}),
+          ...(body.timezone ? { timezone: body.timezone } : {}),
+        },
+      })
+    }
+
+    if (body.notifications) {
+      await prisma.notificationPref.upsert({
+        where: { tenantId: ctx.tenantId },
+        create: { tenantId: ctx.tenantId, ...body.notifications },
+        update: body.notifications,
+      })
+    }
+
+    await audit({
+      action: 'tenant.settings_changed',
+      actorType: 'user',
+      actorId: ctx.userId,
+      tenantId: ctx.tenantId,
+      payload: body,
+      ip: req.ip,
+    })
+    return { ok: true }
+  })
+
+  /**
+   * Close account. Owner-only, and deliberately not instant deletion: the
+   * tenant is disabled and credentials revoked, so mail stops immediately,
+   * but the record survives for billing reconciliation and abuse history.
+   */
+  app.post('/t/:tenantId/settings/close', async (req) => {
+    const ctx = await context(req, 'billing')
+    const body = z.object({ confirm: z.literal(true) }).parse(req.body)
+    void body
+
+    await disableTenant(ctx.tenantId, 'Closed by the account owner')
+    await audit({
+      action: 'tenant.closed_by_owner',
+      actorType: 'user',
+      actorId: ctx.userId,
+      tenantId: ctx.tenantId,
+      ip: req.ip,
+    })
+    return { ok: true }
   })
 
   app.post('/t/:tenantId/team/invites', async (req, reply) => {

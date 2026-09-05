@@ -4,6 +4,8 @@ import { api, ApiError, type Me } from './api'
 import { Spinner } from './ui'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import Token from './pages/Token'
+import Forgot from './pages/Forgot'
 import Onboarding from './pages/Onboarding'
 import Home from './pages/Home'
 import Domains from './pages/Domains'
@@ -37,10 +39,24 @@ export default function App() {
 
   if (loading) return <Spinner />
 
+  // Token landing pages are reachable signed out AND signed in: an invite may
+  // arrive while another account is already open in the browser.
+  const tokenRoutes = (
+    <>
+      <Route path="/verify/:token" element={<Token mode="verify" onDone={refresh} />} />
+      <Route path="/magic/:token" element={<Token mode="magic" onDone={refresh} />} />
+      <Route path="/reset/:token" element={<Token mode="reset" onDone={refresh} />} />
+      <Route path="/invite/:token" element={<Token mode="invite" onDone={refresh} />} />
+    </>
+  )
+
   if (!me) {
     return (
       <Routes>
+        {tokenRoutes}
         <Route path="/signup" element={<Signup onDone={refresh} />} />
+        <Route path="/forgot" element={<Forgot mode="reset" />} />
+        <Route path="/magic" element={<Forgot mode="magic" />} />
         <Route path="*" element={<Login onDone={refresh} />} />
       </Routes>
     )
@@ -51,6 +67,7 @@ export default function App() {
 
   return (
     <Routes>
+      {tokenRoutes}
       <Route path="/t/:tenantId/*" element={<Workspace me={me} refresh={refresh} />} />
       <Route path="*" element={<Navigate to={`/t/${first.id}`} replace />} />
     </Routes>

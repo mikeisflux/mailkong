@@ -4,7 +4,6 @@ import { buildServer } from '../server.js'
 import { prisma } from '../db.js'
 import { disconnectRedis } from '../redis.js'
 import { sha256, hashSecret } from '../lib/crypto.js'
-import type { FastifyInstance } from 'fastify'
 
 /**
  * The token flows, exercised through the real HTTP stack.
@@ -14,7 +13,9 @@ import type { FastifyInstance } from 'fastify'
  * email-taking endpoints cannot be used to enumerate accounts.
  */
 
-let app: FastifyInstance
+// Inferred rather than annotated: buildServer's instance carries our own
+// pino logger type, which does not match the bare FastifyInstance default.
+let app: Awaited<ReturnType<typeof buildServer>>
 const EMAIL = 'authtest@example.org'
 
 const post = (url: string, payload?: unknown) => app.inject({ method: 'POST', url, payload: payload ?? {} })
