@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pricing — Mailkong</title>
+<meta name="description" content="Transactional email pricing. From 50,000 to 1,000,000 messages a month, with SMTP, HTTP API, webhooks and inbound routing on every plan.">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📮</text></svg>">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="logo" href="/"><span class="mark">✦</span> Mailkong</a>
+    <nav class="main">
+      <a href="/#how" class="hide-sm">How it works</a>
+      <a href="/pricing.html">Pricing</a>
+      <a href="https://docs.mailkong.net" class="hide-sm">Docs</a>
+      <a href="https://app.mailkong.net/login">Sign in</a>
+      <a href="#plans" class="btn btn-primary">Start sending</a>
+    </nav>
+  </div>
+</header>
+
+<section style="padding-bottom:36px">
+  <div class="wrap narrow" style="text-align:center">
+    <h1 style="font-size:clamp(1.9rem,4vw,2.8rem)">Pay for volume. Nothing else.</h1>
+    <p style="font-size:1.125rem; margin-inline:auto">
+      Every plan includes SMTP, the HTTP API, webhooks, inbound routing and unlimited
+      team members. The only thing that changes is how much you send.
+    </p>
+  </div>
+</section>
+
+<section style="padding-top:20px" id="plans">
+  <div class="wrap">
+    <div class="plans">
+      <div class="plan">
+        <h3>Starter</h3>
+        <div class="price">$15<span> / month</span></div>
+        <p class="sub">A side project or a single site.</p>
+        <ul>
+          <li>50,000 messages a month</li>
+          <li>3 sending domains</li>
+          <li>2 webhook endpoints</li>
+          <li>5 inbound routes</li>
+          <li>7-day message retention</li>
+          <li>Shared transactional pool</li>
+          <li>Email support</li>
+        </ul>
+        <a href="https://app.mailkong.net/signup?plan=starter" class="btn btn-ghost">Choose Starter</a>
+      </div>
+
+      <div class="plan featured">
+        <span class="badge">Most popular</span>
+        <h3>Growth</h3>
+        <div class="price">$50<span> / month</span></div>
+        <p class="sub">A product with real customers.</p>
+        <ul>
+          <li>250,000 messages a month</li>
+          <li>15 sending domains</li>
+          <li>10 webhook endpoints</li>
+          <li>25 inbound routes</li>
+          <li>30-day message retention</li>
+          <li>Shared transactional pool</li>
+          <li>Email support</li>
+        </ul>
+        <a href="https://app.mailkong.net/signup?plan=growth" class="btn btn-primary">Choose Growth</a>
+      </div>
+
+      <div class="plan">
+        <h3>Pro</h3>
+        <div class="price">$150<span> / month</span></div>
+        <p class="sub">Volume, and reputation you control.</p>
+        <ul>
+          <li>1,000,000 messages a month</li>
+          <li>Unlimited sending domains</li>
+          <li>Unlimited webhook endpoints</li>
+          <li>Unlimited inbound routes</li>
+          <li>90-day message retention</li>
+          <li>Dedicated IP available</li>
+          <li>Priority support</li>
+        </ul>
+        <a href="https://app.mailkong.net/signup?plan=pro" class="btn btn-ghost">Choose Pro</a>
+      </div>
+    </div>
+
+    <p style="text-align:center; color:var(--ink-3); font-size:.9375rem; margin-top:28px">
+      Sending more than a million a month? <a href="mailto:sales@mailkong.net">Talk to us</a> —
+      we price above that individually.
+    </p>
+  </div>
+</section>
+
+<section class="alt">
+  <div class="wrap">
+    <h2 style="margin-bottom:28px">Full comparison</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th style="min-width:210px">&nbsp;</th><th>Starter</th><th>Growth</th><th>Pro</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Messages per month</td><td class="num">50,000</td><td class="num">250,000</td><td class="num">1,000,000</td></tr>
+          <tr><td>Sending domains</td><td class="num">3</td><td class="num">15</td><td>Unlimited</td></tr>
+          <tr><td>SMTP relay (port 587)</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td>HTTP API</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Webhook endpoints</td><td class="num">2</td><td class="num">10</td><td>Unlimited</td></tr>
+          <tr><td>Inbound routes</td><td class="num">5</td><td class="num">25</td><td>Unlimited</td></tr>
+          <tr><td>Message retention</td><td>7 days</td><td>30 days</td><td>90 days</td></tr>
+          <tr><td>Open and click tracking</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Automatic suppression</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Team members</td><td>Unlimited</td><td>Unlimited</td><td>Unlimited</td></tr>
+          <tr><td>Sending IPs</td><td>Shared</td><td>Shared</td><td>Shared or dedicated</td></tr>
+          <tr><td>Support</td><td>Email</td><td>Email</td><td>Priority</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap narrow">
+    <h2>Billing questions</h2>
+
+    <details class="faq">
+      <summary>What counts as a message?</summary>
+      <p>One message to one recipient. A single API call addressed to three people counts as three. Inbound messages routed to your webhook do not count against your sending allowance.</p>
+    </details>
+
+    <details class="faq">
+      <summary>What happens if I go over?</summary>
+      <p>Sending stops rather than silently billing you. The API returns <code>402</code> with the reason, your dashboard shows it, and you will have been warned at 80% of your allowance. Upgrading takes effect immediately.</p>
+    </details>
+
+    <details class="faq">
+      <summary>Can I change plans mid-month?</summary>
+      <p>Yes, at any time. Stripe prorates the difference, and your new limits apply the moment the change goes through.</p>
+    </details>
+
+    <details class="faq">
+      <summary>How much is a dedicated IP?</summary>
+      <p>It is a Pro add-on, priced per IP per month, and it is not instant — we allocate the address, set its reverse DNS, and warm it gradually before your volume moves onto it. Request it from your dashboard and we will come back to you with timing.</p>
+    </details>
+
+    <details class="faq">
+      <summary>Do you offer annual billing?</summary>
+      <p>Not yet. Everything is month to month, cancel whenever, and your data is exportable on the way out.</p>
+    </details>
+  </div>
+</section>
+
+<section class="alt">
+  <div class="wrap">
+    <div class="cta">
+      <h2>Start with a test send.</h2>
+      <p>Verify a domain and send yourself a message before you pay for anything.</p>
+      <p style="margin-top:24px"><a href="https://app.mailkong.net/signup" class="btn btn-primary btn-lg">Create an account</a></p>
+    </div>
+  </div>
+</section>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="legal" style="border-top:none; padding-top:0">
+      <span>© <span id="yr">2026</span> Mailkong. All rights reserved.</span>
+      <span>
+        <a href="/">Home</a> &nbsp;·&nbsp;
+        <a href="https://docs.mailkong.net">Docs</a> &nbsp;·&nbsp;
+        <a href="https://status.mailkong.net">Status</a> &nbsp;·&nbsp;
+        <a href="/acceptable-use.html">Acceptable use</a>
+      </span>
+    </div>
+  </div>
+</footer>
+
+<script>document.getElementById('yr').textContent = new Date().getFullYear()</script>
+</body>
+</html>

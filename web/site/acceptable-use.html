@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acceptable use — Mailkong</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📮</text></svg>">
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <a class="logo" href="/"><span class="mark">✦</span> Mailkong</a>
+    <nav class="main"><a href="/pricing.html">Pricing</a><a href="https://app.mailkong.net/login">Sign in</a></nav>
+  </div>
+</header>
+
+<section>
+  <div class="wrap narrow">
+    <h1 style="font-size:2rem">Acceptable use</h1>
+    <p style="color:var(--ink-3); font-size:.9375rem">
+      This is a plain-language summary of what you may and may not send. It is not a
+      substitute for the full terms, and it is written to be read rather than skipped.
+    </p>
+
+    <h2 style="font-size:1.25rem; margin-top:36px">What Mailkong is for</h2>
+    <p>
+      Transactional mail: messages a person triggered or explicitly asked for.
+      Receipts, password resets, order and shipping updates, account alerts,
+      security notifications, one-to-one replies.
+    </p>
+
+    <h2 style="font-size:1.25rem; margin-top:32px">What you may not send</h2>
+    <ul style="font-size:.9375rem; line-height:1.8">
+      <li>Mail to addresses you did not collect yourself, including purchased, scraped, rented or appended lists.</li>
+      <li>Bulk marketing or newsletters on the shared pool. Ask us about a dedicated IP instead.</li>
+      <li>Anything deceptive about who the sender is, including forged headers or look-alike domains.</li>
+      <li>Phishing, credential harvesting, malware, or links to any of the above.</li>
+      <li>Mail on behalf of a third party whose sending practices you cannot vouch for.</li>
+    </ul>
+
+    <h2 style="font-size:1.25rem; margin-top:32px">Limits we enforce automatically</h2>
+    <p>
+      These are not warnings — the system applies them without waiting for a human.
+    </p>
+    <ul style="font-size:.9375rem; line-height:1.8">
+      <li>You cannot send from a domain until its SPF and DKIM records verify.</li>
+      <li>New accounts start with a low daily cap that rises automatically after a clean sending history.</li>
+      <li>Hard bounces and spam complaints are suppressed immediately and permanently until you remove them.</li>
+      <li>An account whose bounce or complaint rate spikes is paused, and a human reviews it.</li>
+    </ul>
+    <p>
+      A paused account keeps full dashboard access. You will be able to see exactly
+      why, and the API will tell your application the reason rather than failing
+      silently.
+    </p>
+
+    <h2 style="font-size:1.25rem; margin-top:32px">Reporting abuse</h2>
+    <p>
+      If you received mail from our infrastructure that you believe violates any of
+      the above, write to <a href="mailto:abuse@mailkong.net">abuse@mailkong.net</a>.
+      Reports are read by a person, and include enough for us to identify the sender
+      in seconds.
+    </p>
+  </div>
+</section>
+
+<footer class="site">
+  <div class="wrap"><div class="legal" style="border-top:none; padding-top:0">
+    <span>© <span id="yr">2026</span> Mailkong.</span>
+    <span><a href="/">Home</a> · <a href="/pricing.html">Pricing</a></span>
+  </div></div>
+</footer>
+<script>document.getElementById('yr').textContent = new Date().getFullYear()</script>
+</body>
+</html>
