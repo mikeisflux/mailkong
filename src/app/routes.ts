@@ -14,6 +14,7 @@ import { suppress, unsuppress } from '../services/suppressions.js'
 import { getQuota, planLimits } from '../services/usage.js'
 import { WEBHOOK_EVENTS } from '../services/webhooks.js'
 import { audit } from '../services/audit.js'
+import { postalAdmin } from '../postal/index.js'
 import type { MemberRole } from '@prisma/client'
 
 /**
@@ -367,6 +368,77 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
       reply.code(204)
     },
   )
+
+  // ------------------------------------------------------------- inbound
+
+  app.get('/t/:tenantId/inbound', async (req) => {
+    const ctx = await context(req, 'activity')
+    return {
+      data: await prisma.inboundRoute.findMany({
+        where: { tenantId: ctx.tenantId },
+        orderBy: { createdAt: 'desc' },
+      }),
+    }
+  })
+
+  app.post('/t/:tenantId/inbound', async (req, reply) => {
+    const ctx = await context(req, 'credentials')
+    const body = z.object({
+      address: z.string().min(1).max(64),
+      domain: z.string().min(3),
+      endpoint_url: z.string().url(),
+    }).parse(req.body)
+
+    const tenant = await prisma.tenant.findUniqueOrThrow({
+      where: { id: ctx.tenantId },
+      include: { plan: true },
+    })
+    const limits = planLimits(tenant.plan?.limits)
+    const count = await prisma.inboundRoute.count({ where: { tenantId: ctx.tenantId } })
+    if (limits.routes >= 0 && count >= limits.routes) {
+      throw conflict('route_limit', `Your plan allows ${limits.routes} inbound routes`)
+    }
+
+    const server = await prisma.server.findFirst({ where: { tenantId: ctx.tenantId } })
+    let postalRouteId: string | null = null
+    if (server?.postalPermalink) {
+      const created = await postalAdmin.createRoute(server.postalPermalink, {
+        name: body.address,
+        domain: body.domain,
+        endpointUrl: body.endpoint_url,
+      })
+      postalRouteId = String(created.id)
+    }
+
+    const route = await prisma.inboundRoute.create({
+      data: {
+        tenantId: ctx.tenantId,
+        serverId: server?.id ?? null,
+        postalRouteId,
+        address: body.address,
+        domain: body.domain,
+        endpointUrl: body.endpoint_url,
+      },
+    })
+    reply.code(201)
+    return route
+  })
+
+  app.delete<{ Params: { tenantId: string; id: string } }>('/t/:tenantId/inbound/:id', async (req, reply) => {
+    const ctx = await context(req, 'credentials')
+    const route = await prisma.inboundRoute.findFirst({
+      where: { id: req.params.id, tenantId: ctx.tenantId },
+      include: { server: true },
+    })
+    if (!route) throw notFound('Route')
+    if (route.server?.postalPermalink && route.postalRouteId) {
+      await postalAdmin
+        .deleteRoute(route.server.postalPermalink, Number(route.postalRouteId))
+        .catch(() => undefined)
+    }
+    await prisma.inboundRoute.delete({ where: { id: route.id } })
+    reply.code(204)
+  })
 
   app.get('/t/:tenantId/usage', async (req) => {
     const ctx = await context(req, 'activity')
