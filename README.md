@@ -34,7 +34,9 @@ Internet / customer apps
 | `src/admin/` | Admin console backend |
 | `src/postal/` | Postal clients — send API, and the provisioning agent |
 | `src/services/` | The rules: quotas, domains, send pipeline, events |
-| `src/jobs/` | DNS sweep, webhook delivery, usage, policy, retention |
+| `src/jobs/` | DNS sweep, webhook delivery, usage, policy, retention, on-call health |
+| `src/app/sso.ts` | OIDC single sign-on for customer teams |
+| `src/admin/users.ts` | Operator and customer-user administration |
 | `src/mail/` | Platform's own email — sent through the internal tenant |
 | `web/site/` | Marketing site (static HTML) |
 | `web/docs/` | Documentation + API reference |
@@ -43,7 +45,7 @@ Internet / customer apps
 | `web/admin/` | Admin console (React) |
 | `infra/postal-agent/` | Provisioning agent that runs on Box B |
 | `infra/dns/` | Platform DNS zone |
-| `infra/scripts/` | Backup and restore |
+| `infra/scripts/` | Deploy, backup, restore |
 | `docs/` | Infrastructure decisions, runbook, OpenAPI |
 
 ## Running it locally
@@ -65,8 +67,9 @@ npm --prefix web/admin run dev         # admin           :5174
 The dev fixture signs in as `dev@mailkong.net` / `devpassword1234`.
 
 ```bash
-npm test          # 43 tests: the send pipeline and every auth token flow,
-                  # against real Postgres and Redis with Postal stubbed
+npm test          # 68 tests: the send pipeline, every auth token flow,
+                  # tenant isolation and the admin lockout guards, against
+                  # real Postgres and Redis with Postal stubbed
 npm run typecheck
 npm run docs:api  # regenerate web/docs/openapi.json from docs/openapi.yaml
 ```
@@ -99,6 +102,16 @@ Two boxes, per `docs/infrastructure.md`:
 message, including the PTR ordering that OVH enforces and the Postal webhook
 without which nothing ever leaves `queued`.
 
+After that, deploys are one command on Box A:
+
+```bash
+/opt/mailkong/infra/scripts/deploy.sh main
+```
+
+It refuses a deploy it cannot finish, backs up before migrating, and rolls the
+release back if the new version does not answer its health check. Migrations
+are not reverted by a rollback — the script says so when it happens.
+
 ## Documents
 
 | File | What it settles |
@@ -120,9 +133,25 @@ Until that tenant exists and has a verified domain, platform email is logged
 rather than sent. Signup still works; the confirmation email just does not
 arrive. **Finish step 10 of the Phase 0 runbook before onboarding anyone.**
 
+## What is implemented
+
+All five phases of the spec.
+
+| Phase | Status |
+|---|---|
+| 0 — engine | Runbook, DNS zone, Postal agent, deploy scripts |
+| 1 — dashboard MVP | Auth, onboarding, domains, credentials, test send, activity, usage |
+| 2 — admin MVP | Tenants, pause/resume, impersonation, global search, audit log |
+| 3 — sellable | Stripe, webhooks, inbound, suppressions, status page, docs |
+| 4 — scale | IP pools and dedicated IPs, SSO, on-call alerting, analytics |
+
+Beyond the spec, because the platform does not function without them:
+platform email (the internal tenant sends our own mail), the full set of
+token auth flows, operator TOTP enrolment, and user and operator CRUD.
+
 ## Status
 
-Phases 0–3 of the spec are implemented. Before public signup:
+All five phases are implemented. Before public signup:
 
 - [ ] OVH port 25 request answered
 - [ ] Both boxes provisioned per the runbook

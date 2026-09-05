@@ -50,6 +50,8 @@
     <a href="#webhooks">Webhooks &amp; signatures</a>
     <a href="#inbound">Inbound routes</a>
     <a href="#suppressions">Suppressions</a>
+    <h4>Team</h4>
+    <a href="#sso">Single sign-on</a>
     <h4>Troubleshooting</h4>
     <a href="#deferred">Why mail is deferred</a>
     <a href="#errors">Error codes</a>
@@ -252,6 +254,31 @@ app.post('/hooks/mail', express.raw({ type: 'application/json' }), (req, res) =&
       account; contact support if you think one is a mistake.
     </p>
 
+    <h2 id="sso">Single sign-on</h2>
+    <p>
+      Let your team sign in with Google Workspace, Okta, Entra, or anything else that
+      speaks OpenID Connect, instead of separate passwords.
+    </p>
+    <ol>
+      <li>In <strong>Settings → Single sign-on</strong>, copy the redirect URI we show you.</li>
+      <li>Create an OIDC application in your identity provider and paste that URI in. Providers reject the setup without it.</li>
+      <li>Bring back the issuer URL, client ID and client secret. We read the issuer's discovery document to find the rest.</li>
+      <li>List the email domains this connection may use — usually just your company domain.</li>
+    </ol>
+
+    <div class="note">
+      We only accept a sign-in when your provider asserts a <strong>verified</strong> email
+      address in one of the domains you registered. This is what stops a misconfigured
+      provider vending accounts into your organization.
+    </div>
+
+    <p>
+      Turn on <strong>Require SSO</strong> to block password sign-in for those domains
+      entirely. Anyone signing in for the first time gets the default role you choose;
+      existing members keep the role they already have, so enabling SSO cannot silently
+      demote an owner.
+    </p>
+
     <h2 id="deferred">Why mail is deferred or refused</h2>
     <p>In rough order of how often it happens:</p>
     <table>
@@ -263,6 +290,7 @@ app.post('/hooks/mail', express.raw({ type: 'application/json' }), (req, res) =&
         <tr><td><code>plan_cap_reached</code></td><td>Monthly allowance exhausted</td><td>Upgrade, or wait for the period to reset</td></tr>
         <tr><td><code>account_paused</code></td><td>Bounce or complaint rate crossed the threshold</td><td>The reason is in your dashboard; reply to the alert email</td></tr>
         <tr><td><code>past_due</code></td><td>A payment failed</td><td>Update your card in Usage &amp; billing</td></tr>
+        <tr><td><code>sso_required</code></td><td>Your organization requires single sign-on</td><td>Use the SSO button rather than a password</td></tr>
         <tr><td>Delivered but in spam</td><td>Usually no plain-text part, or no DMARC</td><td>Send <code>text</code> as well as <code>html</code>; publish DMARC</td></tr>
       </tbody>
     </table>
