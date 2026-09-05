@@ -1,5 +1,5 @@
 import { prisma } from '../db.js'
-import { redis } from '../redis.js'
+import { getRedis } from '../redis.js'
 import type { SuppressionReason } from '@prisma/client'
 
 /**
@@ -11,7 +11,7 @@ const cacheKey = (tenantId: string, email: string) => `supp:${tenantId}:${email.
 
 export async function isSuppressed(tenantId: string, email: string): Promise<boolean> {
   const key = cacheKey(tenantId, email)
-  const cached = await redis.get(key)
+  const cached = await getRedis().get(key)
   if (cached !== null) return cached === '1'
 
   const normalized = email.toLowerCase()
@@ -24,7 +24,7 @@ export async function isSuppressed(tenantId: string, email: string): Promise<boo
     select: { id: true },
   })
 
-  await redis.set(key, hit ? '1' : '0', 'EX', 300)
+  await getRedis().set(key, hit ? '1' : '0', 'EX', 300)
   return hit !== null
 }
 
@@ -59,10 +59,10 @@ export async function unsuppress(tenantId: string | null, email: string): Promis
 
 async function invalidate(tenantId: string | null, email: string): Promise<void> {
   if (tenantId) {
-    await redis.del(cacheKey(tenantId, email))
+    await getRedis().del(cacheKey(tenantId, email))
     return
   }
   // Global change: clear every tenant's cached answer for this address.
-  const keys = await redis.keys(`supp:*:${email}`)
-  if (keys.length) await redis.del(...keys)
+  const keys = await getRedis().keys(`supp:*:${email}`)
+  if (keys.length) await getRedis().del(...keys)
 }

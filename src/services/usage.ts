@@ -1,5 +1,5 @@
 import { prisma } from '../db.js'
-import { redis } from '../redis.js'
+import { getRedis } from '../redis.js'
 import { config } from '../config.js'
 import { paymentRequired } from '../lib/errors.js'
 import type { Tenant } from '@prisma/client'
@@ -54,7 +54,7 @@ export interface QuotaSnapshot {
 
 export async function getQuota(tenant: Tenant): Promise<QuotaSnapshot> {
   const [dailyRaw, subscription] = await Promise.all([
-    redis.get(dayKey(tenant.id)),
+    getRedis().get(dayKey(tenant.id)),
     prisma.subscription.findUnique({
       where: { tenantId: tenant.id },
       include: { },
@@ -89,10 +89,10 @@ export async function reserveSend(tenant: Tenant, count = 1): Promise<void> {
   // -- daily cap (spec 14: new tenants start low and ramp) ---------------
   if (!unlimited(tenant.dailyCap)) {
     const key = dayKey(tenant.id)
-    const used = await redis.incrby(key, count)
-    if (used === count) await redis.expire(key, 60 * 60 * 36)
+    const used = await getRedis().incrby(key, count)
+    if (used === count) await getRedis().expire(key, 60 * 60 * 36)
     if (used > tenant.dailyCap) {
-      await redis.decrby(key, count)
+      await getRedis().decrby(key, count)
       throw paymentRequired(
         'daily_cap_reached',
         `Daily sending cap of ${tenant.dailyCap} reached. It resets at midnight UTC.`,
@@ -107,7 +107,7 @@ export async function reserveSend(tenant: Tenant, count = 1): Promise<void> {
     if (subscription) {
       const used = subscription.sendsUsed + count
       if (used > limits.monthlySends && (plan?.hardStop ?? true)) {
-        if (!unlimited(tenant.dailyCap)) await redis.decrby(dayKey(tenant.id), count)
+        if (!unlimited(tenant.dailyCap)) await getRedis().decrby(dayKey(tenant.id), count)
         throw paymentRequired(
           'plan_cap_reached',
           `Monthly plan limit of ${limits.monthlySends.toLocaleString()} messages reached. Upgrade to continue sending.`,
@@ -121,14 +121,14 @@ export async function reserveSend(tenant: Tenant, count = 1): Promise<void> {
     }
   }
 
-  await redis.incrby(cycleKey(tenant.id), count)
+  await getRedis().incrby(cycleKey(tenant.id), count)
 }
 
 /** Compensating action when Postal refuses a message we already reserved. */
 export async function releaseSend(tenant: Tenant, count = 1): Promise<void> {
   await Promise.all([
-    unlimited(tenant.dailyCap) ? Promise.resolve() : redis.decrby(dayKey(tenant.id), count),
-    redis.decrby(cycleKey(tenant.id), count),
+    unlimited(tenant.dailyCap) ? Promise.resolve() : getRedis().decrby(dayKey(tenant.id), count),
+    getRedis().decrby(cycleKey(tenant.id), count),
     prisma.subscription
       .updateMany({ where: { tenantId: tenant.id }, data: { sendsUsed: { decrement: count } } })
       .catch(() => undefined),
