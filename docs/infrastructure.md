@@ -12,7 +12,7 @@ host must be able to:
 
 1. **Send outbound on port 25.** Most clouds block this permanently.
 2. **Set PTR / reverse DNS per IP.** The spec requires
-   `SEND_IP_1 -> mta1.mail.example.com`.
+   `SEND_IP_1 -> mta1.mailkong.net`.
 3. **Sell additional IPv4 addresses.** Two for `shared-tx` on day one, plus
    one per dedicated-IP customer.
 4. **Tolerate an email platform** without terminating the account the first
@@ -205,15 +205,15 @@ members. Postal binds outbound SMTP to them.
 OVH validates that the forward A record already resolves to the IP before it
 will accept the PTR.
 
-1. Publish `mta1.mail.example.com A SEND_IP_1`. Confirm with
-   `dig +short mta1.mail.example.com`.
+1. Publish `mta1.mailkong.net A SEND_IP_1`. Confirm with
+   `dig +short mta1.mailkong.net`.
 2. Control Panel → Network → Public IP Addresses → `...` → Modify the
    reverse → enter the hostname.
 3. Verify the loop closes:
 
 ```
-dig -x SEND_IP_1 +short        # must return mta1.mail.example.com
-dig +short mta1.mail.example.com   # must return SEND_IP_1
+dig -x SEND_IP_1 +short        # must return mta1.mailkong.net
+dig +short mta1.mailkong.net   # must return SEND_IP_1
 ```
 
 That is forward-confirmed reverse DNS. Gmail and Microsoft defer or reject
@@ -347,5 +347,5 @@ Box A does not need to move.
   directly. The entire plan rests on this assumption.
 - Confirm real month-to-month pricing in the configure step; the advertised
   figures are commitment pricing.
-- A third box for `status.mail.example.com` (VPS-1, ~$4.54/mo) is a Phase 3
+- A third box for `status.mailkong.net` (VPS-1, ~$4.54/mo) is a Phase 3
   item. It must not share infrastructure with what it reports on.

@@ -1,0 +1,583 @@
+// Control-plane data model. See docs/spec section 12.
+//
+// Division of responsibility:
+//   Postal is source of truth for messages, domains, DKIM, queues.
+//   This database is source of truth for users, plans, invoices,
+//   feature flags, suspensions.
+//
+// The `Message` table here is a THIN INDEX only (id, tenant, to, status,
+// created_at) to make admin search fast. Bodies stay in Postal.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- identity
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String?  @map("password_hash")
+  totpSecret    String?  @map("totp_secret")
+  name          String?
+  emailVerified Boolean  @default(false) @map("email_verified")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  memberships Membership[]
+  sessions    Session[]
+  loginTokens LoginToken[]
+
+  @@map("users")
+}
+
+model Session {
+  id                  String   @id @default(cuid())
+  userId              String   @map("user_id")
+  // Set when an admin is impersonating a tenant owner (spec 9.2).
+  // The dashboard renders a persistent "viewing as" banner when present.
+  impersonatorAdminId String?  @map("impersonator_admin_id")
+  ip                  String?
+  userAgent           String?  @map("user_agent")
+  expiresAt           DateTime @map("expires_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// Magic-link and invite acceptance tokens. Single use.
+model LoginToken {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  purpose   String // "magic_link" | "invite" | "password_reset"
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("login_tokens")
+}
+
+// Operators. Deliberately a separate table from User: admin console auth
+// must not share a credential surface with the customer dashboard (spec 9).
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  totpSecret   String?   @map("totp_secret")
+  totpEnabled  Boolean   @default(false) @map("totp_enabled")
+  role         AdminRole @default(READ_ONLY)
+  name         String?
+  lastLoginAt  DateTime? @map("last_login_at")
+  disabledAt   DateTime? @map("disabled_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  auditEvents  AuditEvent[]
+  abuseTickets AbuseTicket[]
+
+  @@map("admin_users")
+}
+
+enum AdminRole {
+  SUPERADMIN
+  SUPPORT
+  BILLING
+  READ_ONLY
+}
+
+// ------------------------------------------------------------------ tenancy
+
+model Tenant {
+  id               String       @id @default(cuid())
+  name             String
+  slug             String       @unique
+  postalOrgId      String?      @unique @map("postal_org_id")
+  stripeCustomerId String?      @unique @map("stripe_customer_id")
+  planId           String?      @map("plan_id")
+  status           TenantStatus @default(PAUSED_PENDING_DOMAIN)
+  // Reason surfaced to the customer when sends are rejected (402/403).
+  statusReason     String?      @map("status_reason")
+  dailyCap         Int          @map("daily_cap")
+  // Set when the cap was last raised automatically; drives the 7-day
+  // clean-bounce-rate ramp in spec 14.
+  capRaisedAt      DateTime?    @map("cap_raised_at")
+  timezone         String       @default("UTC")
+  notes            String?
+  tags             String[]     @default([])
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  plan              Plan?             @relation(fields: [planId], references: [id])
+  memberships       Membership[]
+  servers           Server[]
+  domains           Domain[]
+  credentials       Credential[]
+  webhooks          WebhookEndpoint[]
+  routes            InboundRoute[]
+  suppressions      Suppression[]
+  messages          Message[]
+  subscription      Subscription?
+  auditEvents       AuditEvent[]
+  abuseTickets      AbuseTicket[]
+  usageDays         UsageDay[]
+  ipPools           IpPool[]
+  invites           Invite[]
+  notificationPrefs NotificationPref?
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("tenants")
+}
+
+enum TenantStatus {
+  // Signup created the org; cannot send until one domain verifies (spec 14).
+  PAUSED_PENDING_DOMAIN
+  ACTIVE
+  PAST_DUE
+  // Sending disabled, dashboard login still works.
+  PAUSED
+  // Credentials revoked.
+  DISABLED
+}
+
+model Membership {
+  id        String     @id @default(cuid())
+  userId    String     @map("user_id")
+  tenantId  String     @map("tenant_id")
+  role      MemberRole @default(DEVELOPER)
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@map("memberships")
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  DEVELOPER
+  READ_ONLY
+}
+
+model Invite {
+  id         String     @id @default(cuid())
+  tenantId   String     @map("tenant_id")
+  email      String
+  role       MemberRole @default(DEVELOPER)
+  tokenHash  String     @unique @map("token_hash")
+  invitedBy  String?    @map("invited_by")
+  expiresAt  DateTime   @map("expires_at")
+  acceptedAt DateTime?  @map("accepted_at")
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("invites")
+}
+
+// --------------------------------------------------------------- mail infra
+
+// One Postal mail server per product/environment (prod, staging).
+model Server {
+  id              String   @id @default(cuid())
+  tenantId        String   @map("tenant_id")
+  postalServerId  String?  @map("postal_server_id")
+  // Postal addresses servers by org/server permalink pair.
+  postalPermalink String?  @map("postal_permalink")
+  name            String
+  ipPoolId        String?  @map("ip_pool_id")
+  trackingEnabled Boolean  @default(false) @map("tracking_enabled")
+  retentionDays   Int      @default(7) @map("retention_days")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ipPool   IpPool?        @relation(fields: [ipPoolId], references: [id])
+  routes   InboundRoute[]
+  messages Message[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("servers")
+}
+
+model Domain {
+  id              String     @id @default(cuid())
+  tenantId        String     @map("tenant_id")
+  name            String
+  kind            DomainKind @default(SENDING)
+  postalDomainId  String?    @map("postal_domain_id")
+  spfOk           Boolean    @default(false) @map("spf_ok")
+  dkimOk          Boolean    @default(false) @map("dkim_ok")
+  dmarcOk         Boolean    @default(false) @map("dmarc_ok")
+  returnPathOk    Boolean    @default(false) @map("return_path_ok")
+  mxOk            Boolean    @default(false) @map("mx_ok")
+  // Records Postal generated for this domain, cached for the UI.
+  dnsRecords      Json?      @map("dns_records")
+  lastCheckedAt   DateTime?  @map("last_checked_at")
+  lastCheckOutput String?    @map("last_check_output")
+  verifiedAt      DateTime?  @map("verified_at")
+  createdAt       DateTime   @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([lastCheckedAt])
+  @@map("domains")
+}
+
+enum DomainKind {
+  SENDING
+  TRACKING
+  INBOUND
+}
+
+// SMTP users and API keys. The secret is shown once and never stored.
+model Credential {
+  id                 String         @id @default(cuid())
+  tenantId           String         @map("tenant_id")
+  serverId           String?        @map("server_id")
+  kind               CredentialKind
+  name               String
+  // Displayed to the user for identification, e.g. "pk_live_a1b2c3d4".
+  prefix             String
+  // Argon2 hash of the full secret. Used to authenticate API requests.
+  secretHash         String         @map("secret_hash")
+  postalCredentialId String?        @map("postal_credential_id")
+  // Reserved for scoped keys (spec 10 notes v1 keys are full-access).
+  scopes             String[]       @default([])
+  lastUsedAt         DateTime?      @map("last_used_at")
+  revokedAt          DateTime?      @map("revoked_at")
+  createdAt          DateTime       @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([prefix])
+  @@map("credentials")
+}
+
+enum CredentialKind {
+  API_KEY
+  SMTP
+}
+
+// ------------------------------------------------------------------ IP pools
+
+model IpPool {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  kind         PoolKind @default(SHARED_TX)
+  // Set only for dedicated-{customer} pools.
+  tenantId     String?  @map("tenant_id")
+  postalPoolId String?  @map("postal_pool_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant    Tenant?     @relation(fields: [tenantId], references: [id])
+  addresses IpAddress[]
+  servers   Server[]
+
+  @@map("ip_pools")
+}
+
+enum PoolKind {
+  SHARED_TX
+  SHARED_MKT
+  DEDICATED
+}
+
+model IpAddress {
+  id                   String    @id @default(cuid())
+  poolId               String    @map("pool_id")
+  address              String    @unique
+  ptr                  String?
+  // Warming IPs carry a manual daily cap enforced before the tenant cap.
+  warming              Boolean   @default(true)
+  dailyCap             Int?      @map("daily_cap")
+  lastBlacklistCheckAt DateTime? @map("last_blacklist_check_at")
+  blacklistStatus      Json?     @map("blacklist_status")
+  createdAt            DateTime  @default(now()) @map("created_at")
+
+  pool IpPool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+
+  @@index([poolId])
+  @@map("ip_addresses")
+}
+
+// ------------------------------------------------------------------ messages
+
+// Thin index for admin search. Postal holds the bodies.
+model Message {
+  id              String        @id @default(cuid())
+  tenantId        String        @map("tenant_id")
+  serverId        String?       @map("server_id")
+  postalMessageId String?       @map("postal_message_id")
+  token           String?
+  to              String
+  from            String
+  subject         String?
+  status          MessageStatus @default(QUEUED)
+  tag             String?
+  metadata        Json?
+  // Populated from Postal delivery webhooks.
+  bounceReason    String?       @map("bounce_reason")
+  deliveredAt     DateTime?     @map("delivered_at")
+  failedAt        DateTime?     @map("failed_at")
+  openedAt        DateTime?     @map("opened_at")
+  clickedAt       DateTime?     @map("clicked_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  server Server? @relation(fields: [serverId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([to])
+  @@index([postalMessageId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+enum MessageStatus {
+  QUEUED
+  PENDING
+  SENT
+  DELIVERED
+  BOUNCED
+  FAILED
+  HELD
+}
+
+model Suppression {
+  id        String            @id @default(cuid())
+  // Null tenantId = global suppression applied across every tenant.
+  tenantId  String?           @map("tenant_id")
+  email     String
+  reason    SuppressionReason
+  detail    String?
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, email])
+  @@index([email])
+  @@map("suppressions")
+}
+
+enum SuppressionReason {
+  HARD_BOUNCE
+  COMPLAINT
+  MANUAL
+  UNSUBSCRIBE
+}
+
+// ------------------------------------------------------------------ webhooks
+
+model WebhookEndpoint {
+  id                  String    @id @default(cuid())
+  tenantId            String    @map("tenant_id")
+  url                 String
+  // Argon2 hash. The plaintext signing secret is shown once at creation.
+  secretHash          String    @map("secret_hash")
+  events              String[]  @default([])
+  enabled             Boolean   @default(true)
+  lastStatus          Int?      @map("last_status")
+  lastSuccessAt       DateTime? @map("last_success_at")
+  lastFailureAt       DateTime? @map("last_failure_at")
+  consecutiveFailures Int       @default(0) @map("consecutive_failures")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([tenantId])
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id          String    @id @default(cuid())
+  endpointId  String    @map("endpoint_id")
+  event       String
+  payload     Json
+  statusCode  Int?      @map("status_code")
+  latencyMs   Int?      @map("latency_ms")
+  attempt     Int       @default(1)
+  error       String?
+  succeededAt DateTime? @map("succeeded_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId, createdAt])
+  @@map("webhook_deliveries")
+}
+
+model InboundRoute {
+  id            String   @id @default(cuid())
+  tenantId      String   @map("tenant_id")
+  serverId      String?  @map("server_id")
+  postalRouteId String?  @map("postal_route_id")
+  // "support@", "replies@", or "*" for catch-all.
+  address       String
+  domain        String
+  endpointUrl   String   @map("endpoint_url")
+  spamThreshold Float?   @map("spam_threshold")
+  maxSizeKb     Int?     @map("max_size_kb")
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  server Server? @relation(fields: [serverId], references: [id])
+
+  @@index([tenantId])
+  @@map("inbound_routes")
+}
+
+// ------------------------------------------------------------------- billing
+
+model Plan {
+  id            String   @id @default(cuid())
+  key           String   @unique // "starter" | "growth" | "pro" | "internal"
+  name          String
+  // Full limit set as JSON so plans are editable from admin without a
+  // migration (spec 9.2 "Plans CRUD (limits JSON)").
+  limits        Json
+  monthlyPrice  Int      @map("monthly_price") // cents
+  stripePriceId String?  @map("stripe_price_id")
+  // Hard stop at cap, versus metered Stripe overage.
+  hardStop      Boolean  @default(true) @map("hard_stop")
+  public        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenants Tenant[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                   String    @id @default(cuid())
+  tenantId             String    @unique @map("tenant_id")
+  stripeSubscriptionId String?   @unique @map("stripe_subscription_id")
+  planId               String    @map("plan_id")
+  status               String    @default("active")
+  periodStart          DateTime  @map("period_start")
+  periodEnd            DateTime  @map("period_end")
+  sendsUsed            Int       @default(0) @map("sends_used")
+  cancelAt             DateTime? @map("cancel_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// Per-day rollup driving usage bars, bounce-rate alerts and the auto-pause
+// checks in spec 14. Written by the usage job, read by dashboards.
+model UsageDay {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  day         DateTime @db.Date
+  sent        Int      @default(0)
+  delivered   Int      @default(0)
+  bounced     Int      @default(0)
+  hardBounced Int      @default(0) @map("hard_bounced")
+  complained  Int      @default(0)
+  failed      Int      @default(0)
+  held        Int      @default(0)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, day])
+  @@index([day])
+  @@map("usage_days")
+}
+
+// --------------------------------------------------------------- ops / abuse
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  // Either an operator or, for customer-side actions, a user id string.
+  adminId   String?  @map("admin_id")
+  actorId   String?  @map("actor_id")
+  actorType String   @default("admin") @map("actor_type")
+  tenantId  String?  @map("tenant_id")
+  action    String
+  payload   Json?
+  ip        String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  admin  AdminUser? @relation(fields: [adminId], references: [id])
+  tenant Tenant?    @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([adminId, createdAt])
+  @@index([action])
+  @@map("audit_events")
+}
+
+model AbuseTicket {
+  id         String      @id @default(cuid())
+  tenantId   String?     @map("tenant_id")
+  source     String // "fbl" | "abuse_mailbox" | "auto_bounce_spike" | "manual"
+  subject    String?
+  raw        String
+  status     AbuseStatus @default(NEW)
+  assignedTo String?     @map("assigned_to")
+  resolution String?
+  createdAt  DateTime    @default(now()) @map("created_at")
+  updatedAt  DateTime    @updatedAt @map("updated_at")
+
+  tenant   Tenant?    @relation(fields: [tenantId], references: [id])
+  assignee AdminUser? @relation(fields: [assignedTo], references: [id])
+
+  @@index([status])
+  @@index([tenantId])
+  @@map("abuse_tickets")
+}
+
+enum AbuseStatus {
+  NEW
+  INVESTIGATING
+  RESOLVED
+}
+
+model NotificationPref {
+  id            String   @id @default(cuid())
+  tenantId      String   @unique @map("tenant_id")
+  emails        String[] @default([])
+  bounceSpike   Boolean  @default(true) @map("bounce_spike")
+  capWarning    Boolean  @default(true) @map("cap_warning")
+  webhookDown   Boolean  @default(true) @map("webhook_down")
+  invoiceFailed Boolean  @default(true) @map("invoice_failed")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("notification_prefs")
+}
+
+// Runtime switches flipped from admin without a deploy (spec 9.2 System).
+model FeatureFlag {
+  key       String   @id
+  enabled   Boolean  @default(false)
+  value     Json?
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("feature_flags")
+}
