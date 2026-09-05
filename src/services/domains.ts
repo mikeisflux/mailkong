@@ -4,6 +4,8 @@ import { postalAdmin } from '../postal/index.js'
 import { badRequest, conflict, notFound } from '../lib/errors.js'
 import { planLimits } from './usage.js'
 import { audit } from './audit.js'
+import { notifyTenant } from '../mail/mailer.js'
+import { templates } from '../mail/templates.js'
 import type { Domain } from '@prisma/client'
 
 /** A DNS record we ask the customer to publish, rendered with copy buttons. */
@@ -118,6 +120,26 @@ export async function checkDomain(domainId: string): Promise<Domain> {
       dnsRecords: buildRecords(domain.name, result, domain.kind) as never,
     },
   })
+
+  // Newly verified, or newly broken: both are worth an email, and neither
+  // should fire on every one of the two-minute re-checks.
+  const wasVerified = domain.verifiedAt !== null
+  if (verified && !wasVerified) {
+    await notifyTenant(domain.tenantId, 'bounceSpike', {
+      ...templates.domainVerified({
+        domain: domain.name,
+        url: `${config.APP_URL}/t/${domain.tenantId}/send`,
+      }),
+    })
+  } else if (!verified && wasVerified) {
+    await notifyTenant(domain.tenantId, 'bounceSpike', {
+      ...templates.domainBroken({
+        domain: domain.name,
+        detail: updated.lastCheckOutput ?? 'SPF or DKIM no longer resolves',
+        url: `${config.APP_URL}/t/${domain.tenantId}/domains`,
+      }),
+    })
+  }
 
   if (verified && domain.tenant.status === 'PAUSED_PENDING_DOMAIN') {
     await prisma.tenant.update({

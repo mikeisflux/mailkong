@@ -6,6 +6,8 @@ import { getStripe } from './stripe.js'
 import { logger } from '../lib/logger.js'
 import { audit } from '../services/audit.js'
 import { pauseTenant, resumeTenant } from '../services/provisioning.js'
+import { notifyTenant } from '../mail/mailer.js'
+import { templates } from '../mail/templates.js'
 
 /**
  * Stripe webhook ingress.
@@ -137,6 +139,12 @@ async function handle(event: Stripe.Event): Promise<void> {
         actorType: 'system',
         tenantId: tenant.id,
         payload: { invoice: invoice.id },
+      })
+      await notifyTenant(tenant.id, 'invoiceFailed', {
+        ...templates.invoiceFailed({
+          organization: tenant.name,
+          url: `${config.APP_URL}/t/${tenant.id}/usage`,
+        }),
       })
       break
     }

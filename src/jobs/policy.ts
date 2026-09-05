@@ -2,6 +2,9 @@ import { prisma } from '../db.js'
 import { maybeRaiseDailyCap } from '../services/usage.js'
 import { checkBounceSpike } from '../services/events.js'
 import { logger } from '../lib/logger.js'
+import { config } from '../config.js'
+import { notifyTenant } from '../mail/mailer.js'
+import { templates } from '../mail/templates.js'
 
 /**
  * Periodic enforcement of the product rules in spec 14, for the cases an
@@ -29,6 +32,50 @@ export async function sweepPolicy(): Promise<{ raised: number; checked: number }
   }
 
   return { raised, checked: tenants.length }
+}
+
+/**
+ * Spec 8.2 alerts: a webhook endpoint that has been failing for a while.
+ * Notified once per streak -- the audit row is the "already told them" marker,
+ * and a success resets consecutiveFailures which starts a fresh streak.
+ */
+export async function warnFailingWebhooks(): Promise<number> {
+  const endpoints = await prisma.webhookEndpoint.findMany({
+    where: { enabled: true, consecutiveFailures: { gte: 10 } },
+    include: { tenant: true },
+  })
+
+  let warned = 0
+  for (const endpoint of endpoints) {
+    const already = await prisma.auditEvent.findFirst({
+      where: {
+        tenantId: endpoint.tenantId,
+        action: 'tenant.webhook_failing',
+        createdAt: { gte: endpoint.lastSuccessAt ?? new Date(0) },
+        payload: { path: ['endpointId'], equals: endpoint.id },
+      },
+    })
+    if (already) continue
+
+    await prisma.auditEvent.create({
+      data: {
+        action: 'tenant.webhook_failing',
+        actorType: 'system',
+        tenantId: endpoint.tenantId,
+        payload: { endpointId: endpoint.id, failures: endpoint.consecutiveFailures },
+      },
+    })
+    await notifyTenant(endpoint.tenantId, 'webhookDown', {
+      ...templates.webhookFailing({
+        organization: endpoint.tenant.name,
+        url: endpoint.url,
+        failures: endpoint.consecutiveFailures,
+        dashboardUrl: `${config.APP_URL}/t/${endpoint.tenantId}/webhooks`,
+      }),
+    })
+    warned++
+  }
+  return warned
 }
 
 /**
@@ -63,6 +110,14 @@ export async function warnApproachingCap(): Promise<number> {
         tenantId: sub.tenantId,
         payload: { used: sub.sendsUsed, limit },
       },
+    })
+    await notifyTenant(sub.tenantId, 'capWarning', {
+      ...templates.capWarning({
+        organization: sub.tenant.name,
+        used: sub.sendsUsed,
+        limit,
+        url: `${config.APP_URL}/t/${sub.tenantId}/usage`,
+      }),
     })
     warned++
   }

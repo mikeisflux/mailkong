@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../db.js'
 import { config } from '../config.js'
 import { hashSecret, verifySecret } from '../lib/crypto.js'
-import { badRequest, forbidden, notFound, unauthorized } from '../lib/errors.js'
+import { badRequest, conflict, forbidden, notFound, unauthorized } from '../lib/errors.js'
 import {
   createAdminSession,
   createSession,
@@ -59,6 +59,74 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     await createAdminSession(reply, admin.id, { ip: req.ip, userAgent: req.headers['user-agent'] })
     await audit({ action: 'admin.login', adminId: admin.id, ip: req.ip })
     return { admin: { id: admin.id, email: admin.email, role: admin.role } }
+  })
+
+  /**
+   * TOTP enrolment.
+   *
+   * Login requires 2FA, so a freshly seeded operator would otherwise be
+   * locked out permanently. Enrolment therefore authenticates with email and
+   * password alone -- but only for an account that has no TOTP yet, and it
+   * issues no session. An operator who is already enrolled cannot reach this
+   * at all, so it can never be used to displace an existing authenticator.
+   */
+  app.post('/auth/enroll/begin', async (req) => {
+    const body = z.object({ email: z.string().email(), password: z.string() }).parse(req.body)
+    const admin = await prisma.adminUser.findUnique({ where: { email: body.email.toLowerCase() } })
+    if (!admin || admin.disabledAt) throw unauthorized('Invalid credentials')
+    if (!(await verifySecret(admin.passwordHash, body.password))) throw unauthorized('Invalid credentials')
+    if (admin.totpEnabled) {
+      throw conflict('already_enrolled', 'This account already has two-factor enrolled. Ask a superadmin to reset it.')
+    }
+
+    const secret = authenticator.generateSecret()
+    // Held unconfirmed: totpEnabled stays false until a valid code proves the
+    // authenticator actually holds this secret.
+    await prisma.adminUser.update({ where: { id: admin.id }, data: { totpSecret: secret } })
+
+    return {
+      secret,
+      otpauth_url: authenticator.keyuri(admin.email, 'Mailkong Ops', secret),
+    }
+  })
+
+  app.post('/auth/enroll/confirm', async (req, reply) => {
+    const body = z.object({
+      email: z.string().email(),
+      password: z.string(),
+      totp: z.string().length(6),
+    }).parse(req.body)
+
+    const admin = await prisma.adminUser.findUnique({ where: { email: body.email.toLowerCase() } })
+    if (!admin?.totpSecret || admin.totpEnabled) throw unauthorized('Nothing to confirm')
+    if (!(await verifySecret(admin.passwordHash, body.password))) throw unauthorized('Invalid credentials')
+    if (!authenticator.verify({ token: body.totp, secret: admin.totpSecret })) {
+      throw unauthorized('That code did not match. Check your device clock and try again.')
+    }
+
+    await prisma.adminUser.update({
+      where: { id: admin.id },
+      data: { totpEnabled: true, lastLoginAt: new Date() },
+    })
+    await createAdminSession(reply, admin.id, { ip: req.ip, userAgent: req.headers['user-agent'] })
+    await audit({ action: 'admin.totp_enrolled', adminId: admin.id, ip: req.ip })
+    return { admin: { id: admin.id, email: admin.email, role: admin.role } }
+  })
+
+  /** Resetting someone else's 2FA is a superadmin action and is logged. */
+  app.post<{ Params: { id: string } }>('/operators/:id/reset-totp', async (req) => {
+    const actor = await requireOperator(req, 'system:write')
+    const target = await prisma.adminUser.update({
+      where: { id: req.params.id },
+      data: { totpSecret: null, totpEnabled: false },
+    })
+    await audit({
+      action: 'admin.totp_reset',
+      adminId: actor.id,
+      payload: { target: target.email },
+      ip: req.ip,
+    })
+    return { ok: true }
   })
 
   app.post('/auth/logout', async (req, reply) => {

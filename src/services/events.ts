@@ -4,6 +4,8 @@ import { enqueueWebhook, type WebhookEvent } from './webhooks.js'
 import { suppress } from './suppressions.js'
 import { pauseTenant } from './provisioning.js'
 import { config } from '../config.js'
+import { notifyTenant } from '../mail/mailer.js'
+import { templates } from '../mail/templates.js'
 import type { MessageStatus } from '@prisma/client'
 
 /**
@@ -161,6 +163,18 @@ export async function checkBounceSpike(tenantId: string): Promise<void> {
       status: 'NEW',
     },
   })
+
+  const paused = await prisma.tenant.findUnique({ where: { id: tenantId } })
+  if (paused) {
+    await notifyTenant(tenantId, 'bounceSpike', {
+      ...templates.bounceSpike({
+        organization: paused.name,
+        rate: overBounce ? bounceRate : complaintRate,
+        reason,
+        url: `${config.APP_URL}/t/${tenantId}`,
+      }),
+    })
+  }
 
   logger.warn({ tenantId, bounceRate, complaintRate }, 'tenant auto-paused on spike')
 }

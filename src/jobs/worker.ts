@@ -6,7 +6,7 @@ import { QUEUE_NAMES, registerSchedules } from './queues.js'
 import { deliverWebhook, type WebhookJob } from '../services/webhooks.js'
 import { sweepDomains } from './dns.js'
 import { pruneMessages, rollupUsage } from './usage.js'
-import { sweepPolicy, warnApproachingCap } from './policy.js'
+import { sweepPolicy, warnApproachingCap, warnFailingWebhooks } from './policy.js'
 import { pruneSessions } from '../auth/session.js'
 
 /**
@@ -38,6 +38,7 @@ const workers = [
     async () => {
       await rollupUsage()
       await warnApproachingCap()
+      await warnFailingWebhooks()
     },
     { connection: connection(), concurrency: 1 },
   ),

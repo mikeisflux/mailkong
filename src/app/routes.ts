@@ -2,11 +2,10 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../db.js'
 import { config } from '../config.js'
-import { hashSecret, verifySecret, randomToken, sha256, encrypt } from '../lib/crypto.js'
+import { randomToken, sha256, encrypt } from '../lib/crypto.js'
 import { badRequest, conflict, forbidden, notFound, unauthorized } from '../lib/errors.js'
-import { createSession, destroySession, readSession } from '../auth/session.js'
+import { readSession } from '../auth/session.js'
 import { requireMember, type Capability } from '../auth/rbac.js'
-import { provisionTenant } from '../services/provisioning.js'
 import { addDomain, checkDomain, removeDomain } from '../services/domains.js'
 import { createCredential, revokeCredential } from '../services/credentials.js'
 import { sendMessage } from '../services/send.js'
@@ -14,6 +13,8 @@ import { suppress, unsuppress } from '../services/suppressions.js'
 import { getQuota, planLimits } from '../services/usage.js'
 import { WEBHOOK_EVENTS } from '../services/webhooks.js'
 import { audit } from '../services/audit.js'
+import { authRoutes } from './auth.js'
+import { checkoutRoutes } from '../billing/checkout.js'
 import { postalAdmin } from '../postal/index.js'
 import type { MemberRole } from '@prisma/client'
 
@@ -34,61 +35,8 @@ interface Ctx {
 }
 
 export async function appRoutes(app: FastifyInstance): Promise<void> {
-  // ------------------------------------------------------------------ auth
-
-  app.post('/auth/signup', async (req, reply) => {
-    const flag = await prisma.featureFlag.findUnique({ where: { key: 'signup_open' } })
-    const open = flag?.enabled ?? config.SIGNUP_OPEN
-    if (!open) throw forbidden('signup_closed', 'Signups are currently invite-only')
-
-    const body = z.object({
-      email: z.string().email(),
-      password: z.string().min(12, 'Use at least 12 characters'),
-      name: z.string().min(1).max(80),
-      organization: z.string().min(1).max(80),
-    }).parse(req.body)
-
-    const existing = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } })
-    if (existing) throw conflict('email_taken', 'An account with that email already exists')
-
-    const user = await prisma.user.create({
-      data: {
-        email: body.email.toLowerCase(),
-        name: body.name,
-        passwordHash: await hashSecret(body.password),
-      },
-    })
-
-    const { tenantId } = await provisionTenant({
-      name: body.organization,
-      ownerUserId: user.id,
-      ownerEmail: user.email,
-    })
-
-    await createSession(reply, user.id, { ip: req.ip, userAgent: req.headers['user-agent'] })
-    reply.code(201)
-    return { user: { id: user.id, email: user.email, name: user.name }, tenantId }
-  })
-
-  app.post('/auth/login', async (req, reply) => {
-    const body = z.object({ email: z.string().email(), password: z.string() }).parse(req.body)
-    const user = await prisma.user.findUnique({ where: { email: body.email.toLowerCase() } })
-
-    // Verify against a dummy hash when the user is absent so a missing
-    // account and a wrong password take the same time.
-    const ok = user?.passwordHash
-      ? await verifySecret(user.passwordHash, body.password)
-      : await verifySecret(DUMMY_HASH, body.password)
-    if (!user || !ok) throw unauthorized('Incorrect email or password')
-
-    await createSession(reply, user.id, { ip: req.ip, userAgent: req.headers['user-agent'] })
-    return { user: { id: user.id, email: user.email, name: user.name } }
-  })
-
-  app.post('/auth/logout', async (req, reply) => {
-    await destroySession(req, reply)
-    return { ok: true }
-  })
+  await app.register(authRoutes)
+  await app.register(checkoutRoutes)
 
   app.get('/me', async (req) => {
     const session = await readSession(req)
