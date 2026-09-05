@@ -1,0 +1,25 @@
+[Unit]
+Description=Mailkong background workers
+After=network.target redis-server.service
+Requires=redis-server.service
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/opt/mailkong
+EnvironmentFile=/opt/mailkong/.env
+# Runs the DNS sweep, webhook delivery, usage rollups, policy enforcement
+# and retention pruning. Without it domains never verify, webhooks are never
+# delivered, and the spec 14 auto-pause never fires.
+ExecStart=/usr/bin/node dist/jobs/worker.js
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mailkong
+
+[Install]
+WantedBy=multi-user.target

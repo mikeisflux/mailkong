@@ -1,0 +1,43 @@
+# Provisioning agent for the Mailkong control plane.
+#
+# Runs on Box B alongside Postal, loads Postal's Rails environment, and
+# exposes the object management Postal's HTTP API does not.
+#
+# Install:
+#   cp mailkong-agent.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now mailkong-agent
+
+[Unit]
+Description=Mailkong provisioning agent for Postal
+After=network.target postal.service
+Requires=postal.service
+
+[Service]
+Type=simple
+User=postal
+Group=postal
+WorkingDirectory=/opt/postal/app
+
+# POSTAL_ROOT must point at Postal's application directory -- the one holding
+# config/environment.rb.
+Environment=POSTAL_ROOT=/opt/postal/app
+Environment=RAILS_ENV=production
+Environment=AGENT_PORT=5000
+
+# Must match POSTAL_API_KEY in the control plane's .env. At least 32 chars.
+EnvironmentFile=/etc/mailkong/agent.env
+
+ExecStart=/usr/local/bin/bundle exec ruby /opt/mailkong-agent/agent.rb
+Restart=always
+RestartSec=5
+
+# The agent can create and destroy customer mail objects, so give it no more
+# of the filesystem than it needs.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/postal /var/log/postal
+
+[Install]
+WantedBy=multi-user.target
