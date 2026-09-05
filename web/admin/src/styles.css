@@ -2,7 +2,7 @@
   color-scheme: light;
   --ink: #0d1117; --ink-2: #3d4a5c; --ink-3: #6b7a8d;
   --line: #e3e8ef; --bg: #ffffff; --bg-2: #f7f9fb; --bg-3: #eef2f6;
-  --brand: #3538cd; --brand-ink: #1e1b8f; --brand-wash: #eef2ff;
+  --brand: #b45309; --brand-ink: #92400e; --brand-wash: #fff7ed;
   --ok: #047857; --ok-wash: #ecfdf5;
   --warn: #b45309; --warn-wash: #fffbeb;
   --err: #b91c1c; --err-wash: #fef2f2;
@@ -17,7 +17,7 @@
     color-scheme: dark;
     --ink: #e6edf3; --ink-2: #aebac8; --ink-3: #7d8b9c;
     --line: #22303f; --bg: #0b1017; --bg-2: #10161f; --bg-3: #18202b;
-    --brand: #8b8ffa; --brand-ink: #a5a8ff; --brand-wash: #191c40;
+    --brand: #f0b357; --brand-ink: #fbbf24; --brand-wash: #2b1f0a;
     --ok: #4ade80; --ok-wash: #0d2a1c;
     --warn: #f0b357; --warn-wash: #2b1f0a;
     --err: #f87171; --err-wash: #2b1213;
