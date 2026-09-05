@@ -86,8 +86,27 @@ model AdminUser {
 
   auditEvents  AuditEvent[]
   abuseTickets AbuseTicket[]
+  sessions     AdminSession[]
 
   @@map("admin_users")
+}
+
+// Operator sessions live in their own table. Sharing `sessions` would mean a
+// foreign key from an admin id into `users`, and one lookup bug away from an
+// admin cookie resolving to a customer account.
+model AdminSession {
+  id        String   @id
+  adminId   String   @map("admin_id")
+  ip        String?
+  userAgent String?  @map("user_agent")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  admin AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([expiresAt])
+  @@map("admin_sessions")
 }
 
 enum AdminRole {
@@ -200,6 +219,10 @@ model Server {
   postalServerId  String?  @map("postal_server_id")
   // Postal addresses servers by org/server permalink pair.
   postalPermalink String?  @map("postal_permalink")
+  // Postal authenticates its send API with a key scoped to the mail server,
+  // which is a different secret from any customer-facing API key. Encrypted
+  // rather than hashed: we must replay it to Postal on every send.
+  postalApiKeyEnc String?  @map("postal_api_key_enc")
   name            String
   ipPoolId        String?  @map("ip_pool_id")
   trackingEnabled Boolean  @default(false) @map("tracking_enabled")
@@ -393,8 +416,10 @@ model WebhookEndpoint {
   id                  String    @id @default(cuid())
   tenantId            String    @map("tenant_id")
   url                 String
-  // Argon2 hash. The plaintext signing secret is shown once at creation.
-  secretHash          String    @map("secret_hash")
+  // Encrypted, NOT hashed: we must produce the HMAC on every outgoing
+  // delivery, so the plaintext has to be recoverable. Shown to the customer
+  // once at creation; thereafter only this process can read it.
+  secretEnc           String    @map("secret_enc")
   events              String[]  @default([])
   enabled             Boolean   @default(true)
   lastStatus          Int?      @map("last_status")
