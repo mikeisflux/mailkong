@@ -135,7 +135,8 @@ arrive. **Finish step 10 of the Phase 0 runbook before onboarding anyone.**
 
 ## What is implemented
 
-All five phases of the spec.
+All five phases of the spec, audited route by route against §8.1 and §9.1
+and feature by feature against §8.2 and §9.2.
 
 | Phase | Status |
 |---|---|
