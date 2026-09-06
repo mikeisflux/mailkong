@@ -85,6 +85,8 @@ export interface Domain {
   lastCheckedAt: string | null
   lastCheckOutput: string | null
   dnsRecords: DnsRecord[] | null
+  trackingEnabled: boolean
+  defaultFrom: string | null
 }
 
 export interface Credential {
@@ -113,6 +115,7 @@ export interface Overview {
   last24h: { total: number; bounced: number; bounce_rate: number; by_status: Record<string, number> }
   domains: Array<{ id: string; name: string; verified: boolean; spf: boolean; dkim: boolean; dmarc: boolean }>
   recent: Array<{ id: string; to: string; subject: string | null; status: string; created_at: string }>
+  queue: { queued: number; deferred: number; held: number }
   alerts: Array<{ level: 'warning' | 'error'; message: string }>
 }
 

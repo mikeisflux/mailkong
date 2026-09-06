@@ -13,6 +13,9 @@ import Plans from './pages/Plans'
 import System from './pages/System'
 import Domains from './pages/Domains'
 import Health from './pages/Health'
+import Ips from './pages/Ips'
+import Suppressions from './pages/Suppressions'
+import Billing from './pages/Billing'
 import Audit from './pages/Audit'
 import Users from './pages/Users'
 import Operators from './pages/Operators'
@@ -59,20 +62,29 @@ export default function App() {
           <NavLink to="/abuse" className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ic">⚠</span>Abuse queue
           </NavLink>
+          <NavLink to="/suppressions" className={({ isActive }) => (isActive ? 'active' : '')}>
+            <span className="ic">⊘</span>Suppressions
+          </NavLink>
           <div className="nav-group">Infrastructure</div>
           <NavLink to="/domains" className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ic">◈</span>Domains
           </NavLink>
+          <NavLink to="/ips" className={({ isActive }) => (isActive ? 'active' : '')}>
+            <span className="ic">▪</span>Sending IPs
+          </NavLink>
           <NavLink to="/pools" className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ic">◇</span>IP pools
           </NavLink>
-          <NavLink to="/health" className={({ isActive }) => (isActive ? 'active' : '')}>
+          <NavLink to="/queues" className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ic">♥</span>Queues &amp; health
           </NavLink>
           <NavLink to="/system" className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ic">⚙</span>System
           </NavLink>
           <div className="nav-group">Business</div>
+          <NavLink to="/billing" className={({ isActive }) => (isActive ? 'active' : '')}>
+            <span className="ic">$</span>Billing
+          </NavLink>
           <NavLink to="/plans" className={({ isActive }) => (isActive ? 'active' : '')}>
             <span className="ic">▤</span>Plans
           </NavLink>
@@ -111,6 +123,12 @@ export default function App() {
             <Route path="abuse" element={<Abuse />} />
             <Route path="domains" element={<Domains />} />
             <Route path="health" element={<Health />} />
+            {/* Spec 9.1 names this /queues; /health is kept as an alias so
+                existing bookmarks and the alert emails keep working. */}
+            <Route path="queues" element={<Health />} />
+            <Route path="ips" element={<Ips me={me} />} />
+            <Route path="suppressions" element={<Suppressions me={me} />} />
+            <Route path="billing" element={<Billing me={me} />} />
             <Route path="pools" element={<Pools me={me} />} />
             <Route path="plans" element={<Plans />} />
             <Route path="system" element={<System me={me} />} />

@@ -60,7 +60,8 @@ export interface Operator {
 export interface Overview {
   sends: { last_hour: number; last_24h: number }
   health: { bounce_rate: number; held: number; postal_reachable: boolean }
-  accounts: { past_due: number; paused: number; open_abuse: number }
+  accounts: { past_due: number; paused: number; open_abuse: number; failed_charges: number }
+  ips: { total: number; warming: number; listed: number }
   pools: Array<{ id: string; name: string; kind: string; addresses: number; servers: number; warming: number }>
 }
 

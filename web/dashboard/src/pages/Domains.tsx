@@ -113,6 +113,43 @@ export default function Domains({ tenantId }: { tenantId: string }) {
             )}
 
             {expanded && (
+              <>
+              <div className="grid grid-2" style={{ marginTop: 14 }}>
+                <label className="row" style={{ gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: 'auto' }}
+                    defaultChecked={d.trackingEnabled}
+                    onChange={(e) =>
+                      void api.patch(`/t/${tenantId}/domains/${d.id}`, { tracking_enabled: e.target.checked }).then(load)
+                    }
+                  />
+                  <span>
+                    Track opens and clicks
+                    <div className="muted" style={{ fontSize: '.75rem' }}>
+                      Rewrites links and adds a tracking pixel. Off by default — your privacy
+                      notice should mention it if you turn it on.
+                    </div>
+                  </span>
+                </label>
+                <Field label="Default From address" hint={`Must be at @${d.name}. Prefilled on the test send screen.`}>
+                  <input
+                    defaultValue={d.defaultFrom ?? ''}
+                    placeholder={`no-reply@${d.name}`}
+                    onBlur={(e) =>
+                      e.target.value !== (d.defaultFrom ?? '') &&
+                      void api
+                        .patch(`/t/${tenantId}/domains/${d.id}`, { default_from: e.target.value || null })
+                        .then(load)
+                        .catch((err) => setError(err instanceof ApiError ? err.message : 'Could not save'))
+                    }
+                  />
+                </Field>
+              </div>
+              </>
+            )}
+
+            {expanded && (
               <div className="table-wrap" style={{ marginTop: 14 }}>
                 <table className="dns-table">
                   <thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Required</th></tr></thead>

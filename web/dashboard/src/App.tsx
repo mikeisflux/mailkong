@@ -149,6 +149,9 @@ function Workspace({ me, refresh }: { me: Me; refresh: () => Promise<void> }) {
                 <Route path="inbound" element={<Inbound tenantId={tenantId} />} />
                 <Route path="suppressions" element={<Suppressions tenantId={tenantId} />} />
                 <Route path="usage" element={<Usage tenantId={tenantId} />} />
+                {/* Spec 8.1 lists /billing separately; 8.2 describes one
+                    "Usage + billing" screen, so this is the same view. */}
+                <Route path="billing" element={<Usage tenantId={tenantId} />} />
                 <Route path="settings" element={<Settings tenantId={tenantId} role={tenant.role} />} />
               </Routes>
             )}

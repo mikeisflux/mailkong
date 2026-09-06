@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react'
 import { api, ApiError } from '../api'
-import { Banner, Button, Card, Empty, Field, Spinner } from '../ui'
+import { Banner, Button, Card, Empty, Field, Spinner, relative } from '../ui'
+
+interface InboundMessage {
+  id: string
+  from: string
+  to: string
+  subject: string | null
+  spamScore: number | null
+  preview: string | null
+  createdAt: string
+  route: { address: string; domain: string }
+}
 
 interface Route {
   id: string
@@ -17,7 +28,15 @@ export default function Inbound({ tenantId }: { tenantId: string }) {
   const [form, setForm] = useState({ address: 'support', domain: '', endpoint_url: '' })
   const [error, setError] = useState<string | null>(null)
 
-  const load = () => api.get<{ data: Route[] }>(`/t/${tenantId}/inbound`).then((r) => setRoutes(r.data)).catch(() => setRoutes([]))
+  const [messages, setMessages] = useState<InboundMessage[]>([])
+
+  const load = async () => {
+    await api.get<{ data: Route[] }>(`/t/${tenantId}/inbound`).then((r) => setRoutes(r.data)).catch(() => setRoutes([]))
+    await api
+      .get<{ data: InboundMessage[] }>(`/t/${tenantId}/inbound/messages`)
+      .then((r) => setMessages(r.data))
+      .catch(() => setMessages([]))
+  }
   useEffect(() => { void load() }, [tenantId])
 
   async function create(e: React.FormEvent) {
@@ -72,7 +91,7 @@ export default function Inbound({ tenantId }: { tenantId: string }) {
         </Card>
       )}
 
-      <Card>
+      <Card title="Routes">
         {routes.length === 0 ? (
           <Empty title="No inbound routes"><p>Route replies to a webhook instead of a mailbox nobody reads.</p></Empty>
         ) : (
@@ -85,6 +104,42 @@ export default function Inbound({ tenantId }: { tenantId: string }) {
                     <td className="mono">{r.address}@{r.domain}</td>
                     <td className="mono">{r.endpointUrl}</td>
                     <td>{r.enabled ? 'Active' : 'Disabled'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card title="Recent inbound">
+        <p className="muted" style={{ marginTop: 0 }}>
+          What arrived, whether or not your endpoint accepted it. Bodies are not stored here —
+          the full message went to your webhook.
+        </p>
+        {messages.length === 0 ? (
+          <Empty title="Nothing received yet">
+            <p>Once your MX record resolves, mail arriving on a route appears here.</p>
+          </Empty>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>When</th><th>Route</th><th>From</th><th>Subject</th><th>Spam</th></tr></thead>
+              <tbody>
+                {messages.map((m) => (
+                  <tr key={m.id}>
+                    <td className="muted">{relative(m.createdAt)}</td>
+                    <td className="mono">{m.route.address}@{m.route.domain}</td>
+                    <td className="mono">{m.from}</td>
+                    <td>
+                      {m.subject ?? <span className="muted">(no subject)</span>}
+                      {m.preview && (
+                        <div className="muted" style={{ fontSize: '.75rem', maxWidth: 380, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {m.preview}
+                        </div>
+                      )}
+                    </td>
+                    <td className="num">{m.spamScore?.toFixed(1) ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>

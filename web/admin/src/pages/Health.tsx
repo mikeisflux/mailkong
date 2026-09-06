@@ -17,6 +17,8 @@ interface Payload {
     failure_rate: number
     disabled_endpoints: number
   }
+  certificates: Array<{ host: string; port: number; ok: boolean; expiresAt: string | null; daysRemaining: number | null; issuer: string | null; error: string | null }>
+  blocklisted: Array<{ address: string; list: string; checked_at: string | null }>
   alerts: Array<{ level: 'warning' | 'critical'; message: string }>
 }
 
@@ -79,6 +81,64 @@ export default function Health() {
           <div className="value">{data.control_plane.messages_24h.toLocaleString()}</div>
         </div>
       </div>
+
+      <Card title="Certificates">
+        <p className="muted" style={{ marginTop: 0 }}>
+          Checked from outside, the way a customer's client sees them — a renewed certificate
+          that nginx never reloaded still serves the old one.
+        </p>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Host</th><th>Port</th><th>Expires</th><th>Days left</th><th>Issuer</th></tr></thead>
+            <tbody>
+              {data.certificates.map((c) => (
+                <tr key={`${c.host}:${c.port}`}>
+                  <td className="mono">{c.host}</td>
+                  <td className="num">{c.port}</td>
+                  <td className="muted">{c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : '—'}</td>
+                  <td
+                    className="num"
+                    style={{
+                      color:
+                        c.daysRemaining === null ? undefined
+                        : c.daysRemaining <= 7 ? 'var(--err)'
+                        : c.daysRemaining <= 21 ? 'var(--warn)'
+                        : 'var(--ok)',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {c.daysRemaining ?? '—'}
+                  </td>
+                  <td className="muted">{c.error ?? c.issuer ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {data.blocklisted.length > 0 && (
+        <Card title="Blocklisted sending IPs">
+          <Banner level="error">
+            Mail from these addresses is being rejected right now. Every hour on a list makes
+            delisting harder — request it immediately.
+          </Banner>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Address</th><th>List</th><th>Detected</th></tr></thead>
+              <tbody>
+                {data.blocklisted.map((b, i) => (
+                  <tr key={i}>
+                    <td className="mono">{b.address}</td>
+                    <td>{b.list}</td>
+                    <td className="muted">{b.checked_at ? new Date(b.checked_at).toLocaleString() : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-2">
         <Card title="Webhook delivery, last hour">

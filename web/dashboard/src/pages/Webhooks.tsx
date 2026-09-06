@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, type WebhookEndpoint } from '../api'
-import { Button, Card, Empty, Field, RevealOnce, Spinner, Status, relative } from '../ui'
+import { api, ApiError, type WebhookEndpoint } from '../api'
+import { Banner, Button, Card, Empty, Field, RevealOnce, Spinner, Status, relative } from '../ui'
 
 export default function Webhooks({ tenantId }: { tenantId: string }) {
   const [payload, setPayload] = useState<{ events: string[]; data: WebhookEndpoint[] } | null>(null)
@@ -8,6 +8,8 @@ export default function Webhooks({ tenantId }: { tenantId: string }) {
   const [url, setUrl] = useState('')
   const [events, setEvents] = useState<string[]>([])
   const [secret, setSecret] = useState<string | null>(null)
+  const [ping, setPing] = useState<{ id: string; ok: boolean; status_code: number | null; latency_ms: number; error: string | null } | null>(null)
+  const [testing, setTesting] = useState<string | null>(null)
 
   const load = () => api.get<{ events: string[]; data: WebhookEndpoint[] }>(`/t/${tenantId}/webhooks`).then(setPayload)
   useEffect(() => { void load() }, [tenantId])
@@ -104,10 +106,37 @@ crypto.timingSafeEqual(
             action={
               <div className="row">
                 <Status value={w.enabled ? (w.consecutiveFailures > 0 ? 'held' : 'delivered') : 'failed'} />
+                <Button
+                  className="btn-sm"
+                  disabled={testing !== null}
+                  onClick={async () => {
+                    setTesting(w.id)
+                    setPing(null)
+                    try {
+                      const r = await api.post<Omit<NonNullable<typeof ping>, 'id'>>(`/t/${tenantId}/webhooks/${w.id}/test`)
+                      setPing({ id: w.id, ...r })
+                      await load()
+                    } catch (err) {
+                      setPing({ id: w.id, ok: false, status_code: null, latency_ms: 0, error: err instanceof ApiError ? err.message : 'failed' })
+                    } finally {
+                      setTesting(null)
+                    }
+                  }}
+                >
+                  {testing === w.id ? 'Sending…' : 'Send test'}
+                </Button>
                 <Button variant="danger" className="btn-sm" onClick={() => remove(w.id)}>Delete</Button>
               </div>
             }
           >
+            {ping?.id === w.id && (
+              <Banner level={ping.ok ? 'info' : 'error'}>
+                {ping.ok
+                  ? `Your endpoint answered ${ping.status_code} in ${ping.latency_ms}ms. Signature verification is up to your handler — check its logs.`
+                  : `Test failed: ${ping.error ?? `HTTP ${ping.status_code}`}. We retry real events with backoff; a test is a single attempt.`}
+              </Banner>
+            )}
+
             <div className="row" style={{ marginBottom: 12 }}>
               {w.events.map((e) => <code key={e} style={{ background: 'var(--bg-3)', padding: '2px 7px', borderRadius: 5 }}>{e}</code>)}
             </div>

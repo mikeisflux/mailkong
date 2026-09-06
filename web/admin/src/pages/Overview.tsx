@@ -18,6 +18,18 @@ export default function Overview() {
           Check the mail box before anything else.
         </Banner>
       )}
+      {data.ips.listed > 0 && (
+        <Banner level="error">
+          <strong>{data.ips.listed} sending IP{data.ips.listed === 1 ? ' is' : 's are'} on a blocklist.</strong>{' '}
+          Mail is being rejected now. <Link to="/ips">Review</Link>
+        </Banner>
+      )}
+      {data.accounts.failed_charges > 0 && (
+        <Banner level="warning">
+          {data.accounts.failed_charges} invoice{data.accounts.failed_charges === 1 ? '' : 's'} failed to charge.{' '}
+          <Link to="/billing">Review</Link>
+        </Banner>
+      )}
       {data.accounts.open_abuse > 0 && (
         <Banner level="warning">
           {data.accounts.open_abuse} open abuse {data.accounts.open_abuse === 1 ? 'ticket' : 'tickets'}.{' '}
@@ -45,6 +57,26 @@ export default function Overview() {
           <div className="label">Accounts needing attention</div>
           <div className="value">{data.accounts.past_due + data.accounts.paused}</div>
           <div className="sub">{data.accounts.past_due} past due · {data.accounts.paused} paused</div>
+        </div>
+      </div>
+
+      <div className="grid grid-3" style={{ marginBottom: 18 }}>
+        <div className="stat">
+          <div className="label">Sending IPs</div>
+          <div className="value">{data.ips.total}</div>
+          <div className="sub">{data.ips.warming} warming</div>
+        </div>
+        <div className="stat">
+          <div className="label">Blocklisted</div>
+          <div className="value" style={{ color: data.ips.listed > 0 ? 'var(--err)' : undefined }}>
+            {data.ips.listed}
+          </div>
+        </div>
+        <div className="stat">
+          <div className="label">Failed charges</div>
+          <div className="value" style={{ color: data.accounts.failed_charges > 0 ? 'var(--warn)' : undefined }}>
+            {data.accounts.failed_charges}
+          </div>
         </div>
       </div>
 

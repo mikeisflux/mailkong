@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type Message } from '../api'
-import { Button, Card, Empty, Spinner, Status, relative } from '../ui'
+import { api, ApiError, type Message } from '../api'
+import { Banner, Button, Card, Empty, Spinner, Status, relative } from '../ui'
 
 const STATUSES = ['', 'queued', 'sent', 'delivered', 'bounced', 'failed', 'held']
 
@@ -9,6 +9,8 @@ export default function Activity({ tenantId }: { tenantId: string }) {
   const [status, setStatus] = useState('')
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Message | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const params = new URLSearchParams()
@@ -26,6 +28,9 @@ export default function Activity({ tenantId }: { tenantId: string }) {
   return (
     <>
       <h1 style={{ marginBottom: 20 }}>Activity</h1>
+
+      {notice && <Banner level="info">{notice}</Banner>}
+      {error && <Banner level="error">{error}</Banner>}
 
       <Card>
         <div className="row">
@@ -45,7 +50,32 @@ export default function Activity({ tenantId }: { tenantId: string }) {
       </Card>
 
       {selected && (
-        <Card title="Message detail" action={<Button className="btn-sm" onClick={() => setSelected(null)}>Close</Button>}>
+        <Card
+          title="Message detail"
+          action={
+            <div className="row">
+              {['bounced', 'failed', 'held'].includes(selected.status.toLowerCase()) && (
+                <Button
+                  variant="primary"
+                  className="btn-sm"
+                  onClick={async () => {
+                    setError(null)
+                    try {
+                      const r = await api.post<{ id: string }>(`/t/${tenantId}/activity/${selected.id}/resend`)
+                      setNotice(`Resent as ${r.id}.`)
+                      await load()
+                    } catch (err) {
+                      setError(err instanceof ApiError ? err.message : 'Could not resend')
+                    }
+                  }}
+                >
+                  Resend
+                </Button>
+              )}
+              <Button className="btn-sm" onClick={() => setSelected(null)}>Close</Button>
+            </div>
+          }
+        >
           <div className="grid grid-2">
             <div>
               <p><strong>To</strong><br /><code>{selected.to}</code></p>

@@ -77,6 +77,30 @@ export default function Home({ tenantId }: { tenantId: string }) {
           )}
         </Card>
 
+        <Card title="Queue">
+          {data.queue.queued + data.queue.deferred + data.queue.held === 0 ? (
+            <Empty title="Nothing waiting">
+              <p>Every message has left the queue.</p>
+            </Empty>
+          ) : (
+            <>
+              <table>
+                <tbody>
+                  <tr><td>Queued</td><td className="num">{data.queue.queued.toLocaleString()}</td></tr>
+                  <tr><td>Deferred and retrying</td><td className="num">{data.queue.deferred.toLocaleString()}</td></tr>
+                  <tr><td>Held</td><td className="num">{data.queue.held.toLocaleString()}</td></tr>
+                </tbody>
+              </table>
+              {data.queue.deferred > 0 && (
+                <p className="muted" style={{ marginBottom: 0, marginTop: 10 }}>
+                  Deferred means the receiving server asked us to try later. This is normal in
+                  small numbers and usually resolves itself.
+                </p>
+              )}
+            </>
+          )}
+        </Card>
+
         <Card title="Delivery, last 24h">
           {Object.keys(last24h.by_status).length === 0 ? (
             <Empty title="Nothing sent yet" />
