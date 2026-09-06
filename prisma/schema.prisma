@@ -314,6 +314,10 @@ model Domain {
   lastCheckedAt   DateTime?  @map("last_checked_at")
   lastCheckOutput String?    @map("last_check_output")
   verifiedAt      DateTime?  @map("verified_at")
+  // Spec 8.2 domain detail. Tracking is off unless the customer turns it on:
+  // rewriting links has privacy consequences they should choose deliberately.
+  trackingEnabled Boolean    @default(false) @map("tracking_enabled")
+  defaultFrom     String?    @map("default_from")
   createdAt       DateTime   @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -419,6 +423,9 @@ model Message {
   metadata        Json?
   // Populated from Postal delivery webhooks.
   bounceReason    String?       @map("bounce_reason")
+  // Which sending address Postal actually used. Only known once a delivery
+  // event names it, so it is null for queued and for events that omit it.
+  sendingIp       String?       @map("sending_ip")
   deliveredAt     DateTime?     @map("delivered_at")
   failedAt        DateTime?     @map("failed_at")
   openedAt        DateTime?     @map("opened_at")
@@ -433,6 +440,7 @@ model Message {
   @@index([postalMessageId])
   @@index([status])
   @@index([createdAt])
+  @@index([sendingIp, createdAt])
   @@map("messages")
 }
 
@@ -512,6 +520,32 @@ model WebhookDelivery {
   @@map("webhook_deliveries")
 }
 
+/**
+ * A thin index of inbound mail, mirroring the outbound Message index: enough
+ * to show the customer what arrived and whether we handed it on, without
+ * storing another copy of the body.
+ */
+model InboundMessage {
+  id        String   @id @default(cuid())
+  routeId   String   @map("route_id")
+  tenantId  String   @map("tenant_id")
+  from      String
+  to        String
+  subject   String?
+  spamScore Float?   @map("spam_score")
+  sizeBytes Int?     @map("size_bytes")
+  // Truncated preview only. The full body went to the customer's endpoint.
+  preview   String?
+  delivered Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  route InboundRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([routeId, createdAt])
+  @@map("inbound_messages")
+}
+
 model InboundRoute {
   id            String   @id @default(cuid())
   tenantId      String   @map("tenant_id")
@@ -526,8 +560,9 @@ model InboundRoute {
   enabled       Boolean  @default(true)
   createdAt     DateTime @default(now()) @map("created_at")
 
-  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  server Server? @relation(fields: [serverId], references: [id])
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  server   Server?          @relation(fields: [serverId], references: [id])
+  messages InboundMessage[]
 
   @@index([tenantId])
   @@map("inbound_routes")
@@ -552,6 +587,29 @@ model Plan {
   tenants Tenant[]
 
   @@map("plans")
+}
+
+/**
+ * Promotional codes. Stripe owns coupon mechanics for subscriptions; this
+ * records which ones we issued and to whom, so an operator can answer "why is
+ * this account paying less" without opening Stripe.
+ */
+model Coupon {
+  id             String    @id @default(cuid())
+  code           String    @unique
+  stripeCouponId String?   @map("stripe_coupon_id")
+  description    String?
+  percentOff     Int?      @map("percent_off")
+  amountOffCents Int?      @map("amount_off_cents")
+  durationMonths Int?      @map("duration_months")
+  maxRedemptions Int?      @map("max_redemptions")
+  redemptions    Int       @default(0)
+  expiresAt      DateTime? @map("expires_at")
+  active         Boolean   @default(true)
+  createdBy      String?   @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@map("coupons")
 }
 
 model Subscription {

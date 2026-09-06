@@ -15,9 +15,12 @@ import { disableTenant, pauseTenant, resumeTenant } from '../services/provisioni
 import { suppress, unsuppress } from '../services/suppressions.js'
 import { audit } from '../services/audit.js'
 import { postalAdmin } from '../postal/index.js'
+import { checkBlocklists, checkAllCertificates, testAllSendingIps } from '../services/checks.js'
+import { getStripe } from '../billing/stripe.js'
 import { authenticator } from 'otplib'
 import type { AdminUser } from '@prisma/client'
 import { userAdminRoutes } from './users.js'
+import { billingAdminRoutes } from './billing.js'
 
 /**
  * Admin console backend for admin.mailkong.net.
@@ -28,6 +31,7 @@ import { userAdminRoutes } from './users.js'
  */
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   await app.register(userAdminRoutes)
+  await app.register(billingAdminRoutes)
 
   // The allowlist is a network control, applied before authentication so an
   // attacker off-network cannot even probe for valid operator emails.
@@ -133,7 +137,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const hourAgo = new Date(Date.now() - 3_600_000)
     const dayAgo = new Date(Date.now() - 86_400_000)
 
-    const [lastHour, lastDay, byStatus, overCap, paused, openAbuse, pools, postalUp] =
+    const [lastHour, lastDay, byStatus, overCap, paused, openAbuse, pools, postalUp, addresses, failedCharges] =
       await Promise.all([
         prisma.message.count({ where: { createdAt: { gte: hourAgo } } }),
         prisma.message.count({ where: { createdAt: { gte: dayAgo } } }),
@@ -147,6 +151,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         prisma.abuseTicket.count({ where: { status: { in: ['NEW', 'INVESTIGATING'] } } }),
         prisma.ipPool.findMany({ include: { addresses: true, _count: { select: { servers: true } } } }),
         postalAdmin.reachable(),
+        prisma.ipAddress.findMany({ select: { address: true, blacklistStatus: true, warming: true } }),
+        countFailedCharges(),
       ])
 
     const total = byStatus.reduce((n, r) => n + r._count._all, 0)
@@ -160,7 +166,14 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         held,
         postal_reachable: postalUp,
       },
-      accounts: { past_due: overCap, paused, open_abuse: openAbuse },
+      accounts: { past_due: overCap, paused, open_abuse: openAbuse, failed_charges: failedCharges },
+      ips: {
+        total: addresses.length,
+        warming: addresses.filter((a) => a.warming).length,
+        listed: addresses.filter((a) =>
+          ((a.blacklistStatus ?? []) as Array<{ listed: boolean }>).some((r) => r.listed),
+        ).length,
+      },
       pools: pools.map((p) => ({
         id: p.id,
         name: p.name,
@@ -536,9 +549,22 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         prisma.webhookEndpoint.count({ where: { enabled: false } }),
       ])
 
-    const messages24h = await prisma.message.count({ where: { createdAt: { gte: dayAgo } } })
+    const [messages24h, certificates, listedIps] = await Promise.all([
+      prisma.message.count({ where: { createdAt: { gte: dayAgo } } }),
+      checkAllCertificates(),
+      prisma.ipAddress.findMany({ select: { address: true, blacklistStatus: true, lastBlacklistCheckAt: true } }),
+    ])
+
+    const blocklisted = listedIps.flatMap((a) => {
+      const results = (a.blacklistStatus ?? []) as Array<{ name: string; listed: boolean; usable: boolean }>
+      return results
+        .filter((r) => r.listed)
+        .map((r) => ({ address: a.address, list: r.name, checked_at: a.lastBlacklistCheckAt }))
+    })
 
     return {
+      certificates,
+      blocklisted,
       postal: {
         reachable: postalUp,
         queued: postalQueue?.queued ?? null,
@@ -567,7 +593,163 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         stuck,
         webhookFailureRate: webhookTotal > 0 ? webhookFailures / webhookTotal : 0,
         databaseBytes: Number(dbSize[0]?.bytes ?? 0),
+        certificateDays: certificates
+          .filter((c) => c.daysRemaining !== null)
+          .map((c) => ({ host: c.host, days: c.daysRemaining! })),
+        blocklistedIps: blocklisted.map((b) => `${b.address} on ${b.list}`),
       }),
+    }
+  })
+
+  // ------------------------------------------------------------ IP detail
+
+  /**
+   * Spec 9.1 /ips: the flat view of every sending address, with the four
+   * things that decide whether it is healthy -- PTR, recent volume, blocklist
+   * status, and whether it is still warming.
+   */
+  app.get('/ips', async (req) => {
+    await requireOperator(req)
+    const addresses = await prisma.ipAddress.findMany({
+      include: { pool: { include: { tenant: { select: { id: true, name: true } } } } },
+      orderBy: { address: 'asc' },
+    })
+
+    const dayAgo = new Date(Date.now() - 86_400_000)
+    const weekAgo = new Date(Date.now() - 7 * 86_400_000)
+
+    const [volume24, volume7d] = await Promise.all([
+      prisma.message.groupBy({
+        by: ['sendingIp'],
+        where: { sendingIp: { not: null }, createdAt: { gte: dayAgo } },
+        _count: { _all: true },
+      }),
+      prisma.message.groupBy({
+        by: ['sendingIp'],
+        where: { sendingIp: { not: null }, createdAt: { gte: weekAgo } },
+        _count: { _all: true },
+      }),
+    ])
+
+    const by = (rows: typeof volume24) =>
+      new Map(rows.map((r) => [r.sendingIp as string, r._count._all]))
+    const v24 = by(volume24)
+    const v7 = by(volume7d)
+
+    // Attribution depends on Postal naming the address in its delivery line.
+    // Say so rather than presenting a possibly-zero number as fact.
+    const attributed = volume7d.reduce((n, r) => n + r._count._all, 0)
+    const total7d = await prisma.message.count({ where: { createdAt: { gte: weekAgo } } })
+
+    return {
+      attribution: {
+        attributed,
+        total: total7d,
+        // Below this, per-IP volume is not worth reading as a number.
+        reliable: total7d === 0 || attributed / total7d > 0.5,
+      },
+      data: addresses.map((a) => ({
+        id: a.id,
+        address: a.address,
+        ptr: a.ptr,
+        warming: a.warming,
+        daily_cap: a.dailyCap,
+        pool: { id: a.pool.id, name: a.pool.name, kind: a.pool.kind, tenant: a.pool.tenant },
+        volume_24h: v24.get(a.address) ?? 0,
+        volume_7d: v7.get(a.address) ?? 0,
+        last_blacklist_check_at: a.lastBlacklistCheckAt,
+        blacklist_status: a.blacklistStatus,
+      })),
+    }
+  })
+
+  app.patch<{ Params: { id: string } }>('/ips/:id', async (req) => {
+    const admin = await requireOperator(req, 'pool:write')
+    const body = z.object({
+      warming: z.boolean().optional(),
+      daily_cap: z.number().min(0).nullable().optional(),
+      ptr: z.string().min(3).optional(),
+    }).parse(req.body)
+
+    const updated = await prisma.ipAddress.update({
+      where: { id: req.params.id },
+      data: {
+        ...(body.warming !== undefined ? { warming: body.warming } : {}),
+        ...(body.daily_cap !== undefined ? { dailyCap: body.daily_cap } : {}),
+        ...(body.ptr !== undefined ? { ptr: body.ptr } : {}),
+      },
+    })
+    await audit({ action: 'ip.updated', adminId: admin.id, payload: { ip: updated.address, ...body }, ip: req.ip })
+    return updated
+  })
+
+  app.post<{ Params: { id: string } }>('/ips/:id/check-blocklists', async (req) => {
+    await requireOperator(req)
+    const address = await prisma.ipAddress.findUnique({ where: { id: req.params.id } })
+    if (!address) throw notFound('IP address')
+
+    const results = await checkBlocklists(address.address)
+    await prisma.ipAddress.update({
+      where: { id: address.id },
+      data: { lastBlacklistCheckAt: new Date(), blacklistStatus: results as never },
+    })
+    return { address: address.address, results }
+  })
+
+  app.delete<{ Params: { id: string } }>('/ips/:id', async (req, reply) => {
+    const admin = await requireOperator(req, 'pool:write')
+    const address = await prisma.ipAddress.findUnique({ where: { id: req.params.id } })
+    if (!address) throw notFound('IP address')
+    await prisma.ipAddress.delete({ where: { id: address.id } })
+    await audit({ action: 'ip.removed', adminId: admin.id, payload: { ip: address.address }, ip: req.ip })
+    reply.code(204)
+  })
+
+  /** Spec 9.2 System: outbound test from each sending IP. */
+  app.post('/system/outbound-test', async (req) => {
+    await requireOperator(req)
+    return { results: await testAllSendingIps() }
+  })
+
+  // --------------------------------------------------- global suppressions
+
+  app.get('/suppressions', async (req) => {
+    await requireOperator(req)
+    const q = z.object({
+      search: z.string().optional(),
+      scope: z.enum(['all', 'global', 'tenant']).default('all'),
+      tenant_id: z.string().optional(),
+      limit: z.coerce.number().min(1).max(500).default(100),
+    }).parse(req.query)
+
+    const rows = await prisma.suppression.findMany({
+      where: {
+        ...(q.search ? { email: { contains: q.search.toLowerCase() } } : {}),
+        ...(q.scope === 'global' ? { tenantId: null } : {}),
+        ...(q.scope === 'tenant' ? { tenantId: { not: null } } : {}),
+        ...(q.tenant_id ? { tenantId: q.tenant_id } : {}),
+      },
+      include: { tenant: { select: { id: true, name: true, slug: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: q.limit,
+    })
+
+    const [globalCount, tenantCount] = await Promise.all([
+      prisma.suppression.count({ where: { tenantId: null } }),
+      prisma.suppression.count({ where: { tenantId: { not: null } } }),
+    ])
+
+    return {
+      counts: { global: globalCount, tenant: tenantCount },
+      data: rows.map((s) => ({
+        id: s.id,
+        email: s.email,
+        reason: s.reason,
+        detail: s.detail,
+        tenant: s.tenant,
+        global: s.tenantId === null,
+        created_at: s.createdAt,
+      })),
     }
   })
 
@@ -725,6 +907,21 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   })
 }
 
+/**
+ * Stripe is the source of truth for failed charges: a payment can fail before
+ * the webhook that would set PAST_DUE has landed.
+ */
+async function countFailedCharges(): Promise<number> {
+  const stripe = getStripe()
+  if (!stripe) return 0
+  try {
+    const open = await stripe.invoices.list({ status: 'open', limit: 100 })
+    return open.data.filter((i) => (i.attempt_count ?? 0) > 0).length
+  } catch {
+    return 0
+  }
+}
+
 async function requireOperator(req: FastifyRequest, capability?: AdminCapability): Promise<AdminUser> {
   const admin = await readAdminSession(req)
   if (!admin) throw unauthorized('Operator sign-in required')
@@ -739,6 +936,8 @@ export interface HealthInput {
   stuck: number
   webhookFailureRate: number
   databaseBytes: number
+  certificateDays?: Array<{ host: string; days: number }>
+  blocklistedIps?: string[]
 }
 
 /**
@@ -776,6 +975,25 @@ export function buildHealthAlerts(h: HealthInput): Array<{ level: 'warning' | 'c
     alerts.push({ level: 'critical', message: `The control-plane database is ${gb.toFixed(1)} GB. Check message retention pruning.` })
   } else if (gb > 20) {
     alerts.push({ level: 'warning', message: `The control-plane database is ${gb.toFixed(1)} GB.` })
+  }
+
+  // A listed sending IP is the most damaging thing on this list: mail is
+  // being rejected right now, and every hour on the list makes delisting
+  // harder.
+  for (const entry of h.blocklistedIps ?? []) {
+    alerts.push({ level: 'critical', message: `Sending IP listed: ${entry}. Request delisting now.` })
+  }
+
+  // Renewal fails silently far more often than it fails loudly, so warn with
+  // enough runway to fix it by hand.
+  for (const cert of h.certificateDays ?? []) {
+    if (cert.days < 0) {
+      alerts.push({ level: 'critical', message: `The certificate for ${cert.host} has expired.` })
+    } else if (cert.days <= 7) {
+      alerts.push({ level: 'critical', message: `The certificate for ${cert.host} expires in ${cert.days} day(s).` })
+    } else if (cert.days <= 21) {
+      alerts.push({ level: 'warning', message: `The certificate for ${cert.host} expires in ${cert.days} days.` })
+    }
   }
 
   return alerts

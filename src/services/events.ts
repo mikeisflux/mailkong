@@ -32,6 +32,14 @@ const CUSTOMER_EVENT: Record<string, WebhookEvent> = {
   MessageLoaded: 'message.opened',
 }
 
+/** Postal reports the sending address in the delivery output line. */
+function extractSendingIp(output: string | undefined): string | null {
+  if (!output) return null
+  // e.g. "Sent message to mx.example.com [93.184.216.34] from 203.0.113.10"
+  const explicit = /\bfrom\s+(\d{1,3}(?:\.\d{1,3}){3})\b/i.exec(output)
+  return explicit?.[1] ?? null
+}
+
 export interface PostalEvent {
   event: string
   timestamp?: number
@@ -66,6 +74,7 @@ export async function ingestPostalEvent(event: PostalEvent): Promise<void> {
 
   const status = STATUS_BY_EVENT[event.event]
   const now = new Date()
+  const sendingIp = extractSendingIp(event.payload.output)
 
   await prisma.message.update({
     where: { id: message.id },
@@ -76,6 +85,7 @@ export async function ingestPostalEvent(event: PostalEvent): Promise<void> {
       ...(event.event === 'MessageLoaded' ? { openedAt: message.openedAt ?? now } : {}),
       ...(event.event === 'MessageLinkClicked' ? { clickedAt: message.clickedAt ?? now } : {}),
       ...(event.payload.details ? { bounceReason: event.payload.details.slice(0, 1000) } : {}),
+      ...(sendingIp ? { sendingIp } : {}),
     },
   })
 
@@ -198,6 +208,21 @@ export async function ingestInboundMessage(input: {
     logger.info({ routeId: route.id, score: input.spamScore }, 'inbound message dropped as spam')
     return
   }
+
+  // Indexed before dispatch so the Inbound screen shows what arrived even if
+  // the customer's endpoint is down.
+  await prisma.inboundMessage.create({
+    data: {
+      routeId: route.id,
+      tenantId: route.tenantId,
+      from: input.from,
+      to: input.to,
+      subject: input.subject || null,
+      spamScore: input.spamScore ?? null,
+      preview: (input.plainBody ?? '').slice(0, 500) || null,
+      delivered: true,
+    },
+  })
 
   await enqueueWebhook(route.tenantId, 'inbound.message', {
     route: { id: route.id, address: route.address, domain: route.domain },

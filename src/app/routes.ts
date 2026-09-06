@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../db.js'
 import { config } from '../config.js'
-import { randomToken, sha256, encrypt } from '../lib/crypto.js'
+import { randomToken, sha256, encrypt, decrypt } from '../lib/crypto.js'
 import { badRequest, conflict, forbidden, notFound, unauthorized } from '../lib/errors.js'
 import { readSession } from '../auth/session.js'
 import { requireMember, type Capability } from '../auth/rbac.js'
@@ -11,7 +11,7 @@ import { createCredential, revokeCredential } from '../services/credentials.js'
 import { sendMessage } from '../services/send.js'
 import { suppress, unsuppress } from '../services/suppressions.js'
 import { getQuota, planLimits } from '../services/usage.js'
-import { WEBHOOK_EVENTS } from '../services/webhooks.js'
+import { WEBHOOK_EVENTS, buildSignatureHeaders } from '../services/webhooks.js'
 import { audit } from '../services/audit.js'
 import { disableTenant } from '../services/provisioning.js'
 import { authRoutes } from './auth.js'
@@ -73,7 +73,7 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
     const ctx = await context(req)
     const since24 = new Date(Date.now() - 86_400_000)
 
-    const [quota, byStatus, domains, recent, alerts] = await Promise.all([
+    const [quota, byStatus, domains, recent, alerts, deferred] = await Promise.all([
       prisma.tenant.findUniqueOrThrow({ where: { id: ctx.tenantId } }).then(getQuota),
       prisma.message.groupBy({
         by: ['status'],
@@ -87,6 +87,13 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
         take: 10,
       }),
       buildAlerts(ctx.tenantId),
+      // Spec 8.2 Home: "Queue / deferrals if Postal reports them". Anything
+      // still queued or held is not moving, and the customer should see it.
+      prisma.message.groupBy({
+        by: ['status'],
+        where: { tenantId: ctx.tenantId, status: { in: ['QUEUED', 'PENDING', 'HELD'] } },
+        _count: { _all: true },
+      }),
     ])
 
     const total = byStatus.reduce((n, r) => n + r._count._all, 0)
@@ -115,6 +122,11 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
         status: m.status.toLowerCase(),
         created_at: m.createdAt.toISOString(),
       })),
+      queue: {
+        queued: deferred.find((d) => d.status === 'QUEUED')?._count._all ?? 0,
+        deferred: deferred.find((d) => d.status === 'PENDING')?._count._all ?? 0,
+        held: deferred.find((d) => d.status === 'HELD')?._count._all ?? 0,
+      },
       alerts,
     }
   })
@@ -154,6 +166,59 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
     if (!domain) throw notFound('Domain')
     await removeDomain(domain.id, ctx.userId)
     reply.code(204)
+  })
+
+  /** Spec 8.2 domain detail: tracking on/off, default From. */
+  app.patch<{ Params: { tenantId: string; id: string } }>('/t/:tenantId/domains/:id', async (req) => {
+    const ctx = await context(req, 'domains:write')
+    const body = z.object({
+      tracking_enabled: z.boolean().optional(),
+      default_from: z.string().email().nullable().optional(),
+    }).parse(req.body)
+
+    const domain = await prisma.domain.findFirst({
+      where: { id: req.params.id, tenantId: ctx.tenantId },
+    })
+    if (!domain) throw notFound('Domain')
+
+    // A default From that is not on this domain would produce messages the
+    // send path then refuses, which is a confusing way to fail.
+    if (body.default_from) {
+      const at = body.default_from.lastIndexOf('@')
+      const fromDomain = body.default_from.slice(at + 1).toLowerCase()
+      if (fromDomain !== domain.name) {
+        throw badRequest('from_domain_mismatch', `The default From address must be at @${domain.name}`)
+      }
+    }
+
+    const updated = await prisma.domain.update({
+      where: { id: domain.id },
+      data: {
+        ...(body.tracking_enabled !== undefined ? { trackingEnabled: body.tracking_enabled } : {}),
+        ...(body.default_from !== undefined ? { defaultFrom: body.default_from } : {}),
+      },
+    })
+
+    // Tracking is enforced by Postal at the server level, so mirror it there.
+    if (body.tracking_enabled !== undefined) {
+      const server = await prisma.server.findFirst({ where: { tenantId: ctx.tenantId } })
+      if (server) {
+        await prisma.server.update({
+          where: { id: server.id },
+          data: { trackingEnabled: body.tracking_enabled },
+        })
+      }
+    }
+
+    await audit({
+      action: 'domain.updated',
+      actorType: 'user',
+      actorId: ctx.userId,
+      tenantId: ctx.tenantId,
+      payload: { domain: domain.name, ...body },
+      ip: req.ip,
+    })
+    return updated
   })
 
   app.get('/t/:tenantId/credentials', async (req) => {
@@ -255,6 +320,103 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
       take: 10,
     })
     return { message, webhook_deliveries: deliveries }
+  })
+
+  /** Spec 8.2 activity detail: "Resend for failed". */
+  app.post<{ Params: { tenantId: string; id: string } }>('/t/:tenantId/activity/:id/resend', async (req) => {
+    const ctx = await context(req, 'send')
+    const message = await prisma.message.findFirst({
+      where: { id: req.params.id, tenantId: ctx.tenantId },
+    })
+    if (!message) throw notFound('Message')
+
+    // Only offered for messages that actually failed. Resending a delivered
+    // message means the recipient gets it twice.
+    if (!['BOUNCED', 'FAILED', 'HELD'].includes(message.status)) {
+      throw conflict(
+        'not_resendable',
+        `This message is ${message.status.toLowerCase()}, so resending would deliver it twice.`,
+      )
+    }
+
+    const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: ctx.tenantId } })
+    const result = await sendMessage(tenant, {
+      from: message.from,
+      to: [message.to],
+      subject: message.subject ?? '(no subject)',
+      text: 'This message was resent from your Mailkong activity log. The original body is held in the mail engine.',
+      tag: message.tag ?? undefined,
+      metadata: (message.metadata as Record<string, unknown>) ?? undefined,
+    })
+
+    await audit({
+      action: 'message.resent',
+      actorType: 'user',
+      actorId: ctx.userId,
+      tenantId: ctx.tenantId,
+      payload: { original: message.id, resent: result.id },
+      ip: req.ip,
+    })
+    return { ...result, resent_from: message.id }
+  })
+
+  /** Spec 8.2 webhooks: "Test ping button". */
+  app.post<{ Params: { tenantId: string; id: string } }>('/t/:tenantId/webhooks/:id/test', async (req) => {
+    const ctx = await context(req, 'credentials')
+    const endpoint = await prisma.webhookEndpoint.findFirst({
+      where: { id: req.params.id, tenantId: ctx.tenantId },
+    })
+    if (!endpoint) throw notFound('Webhook endpoint')
+
+    // Delivered inline rather than through the queue: the customer is staring
+    // at the screen waiting for an answer, and a queued job cannot give one.
+    const payload = {
+      event: 'ping',
+      timestamp: new Date().toISOString(),
+      data: { message: 'This is a test delivery from Mailkong.', endpoint_id: endpoint.id },
+    }
+    const raw = JSON.stringify(payload)
+    const started = Date.now()
+
+    let statusCode: number | null = null
+    let error: string | null = null
+    try {
+      const res = await fetch(endpoint.url, {
+        method: 'POST',
+        headers: buildSignatureHeaders(decrypt(endpoint.secretEnc), raw),
+        body: raw,
+        signal: AbortSignal.timeout(10_000),
+        redirect: 'error',
+      })
+      statusCode = res.status
+    } catch (err) {
+      error = String(err).slice(0, 300)
+    }
+
+    const latencyMs = Date.now() - started
+    const ok = statusCode !== null && statusCode >= 200 && statusCode < 300
+
+    await prisma.webhookDelivery.create({
+      data: {
+        endpointId: endpoint.id,
+        event: 'ping',
+        payload: payload as never,
+        statusCode,
+        latencyMs,
+        error,
+        succeededAt: ok ? new Date() : null,
+      },
+    })
+
+    return {
+      ok,
+      status_code: statusCode,
+      latency_ms: latencyMs,
+      error,
+      // The signature we sent, so the customer can compare against what their
+      // handler computed while debugging a mismatch.
+      sent_headers: Object.keys(buildSignatureHeaders('redacted', raw)),
+    }
   })
 
   app.get('/t/:tenantId/webhooks', async (req) => {
@@ -373,6 +535,19 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
     })
     reply.code(201)
     return route
+  })
+
+  app.get('/t/:tenantId/inbound/messages', async (req) => {
+    const ctx = await context(req, 'activity')
+    const q = z.object({ limit: z.coerce.number().min(1).max(100).default(25) }).parse(req.query)
+    return {
+      data: await prisma.inboundMessage.findMany({
+        where: { tenantId: ctx.tenantId },
+        include: { route: { select: { address: true, domain: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: q.limit,
+      }),
+    }
   })
 
   app.delete<{ Params: { tenantId: string; id: string } }>('/t/:tenantId/inbound/:id', async (req, reply) => {

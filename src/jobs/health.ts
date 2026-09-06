@@ -3,6 +3,7 @@ import { config } from '../config.js'
 import { logger } from '../lib/logger.js'
 import { postalAdmin } from '../postal/index.js'
 import { buildHealthAlerts } from '../admin/routes.js'
+import { checkAllCertificates, sweepBlocklists } from '../services/checks.js'
 import { sendPlatformMail } from '../mail/mailer.js'
 
 /**
@@ -34,6 +35,10 @@ const REMEDY: Record<string, string> = {
     'Usually one customer endpoint down and retrying. Check the webhook delivery log before assuming it is us.',
   'control-plane database is':
     'Check that the maintenance job is running: `systemctl status mailkong-worker`. Retention pruning lives there.',
+  'Sending IP listed':
+    'Request delisting at the blocklist directly, and find what triggered it in Activity before it happens again.',
+  'certificate for':
+    'On the affected box: `certbot renew --force-renewal` then reload nginx. A renewed certificate nginx never reloaded still serves the old one.',
 }
 
 function remedyFor(message: string): string {
@@ -51,14 +56,25 @@ function fingerprint(message: string): string {
 export async function checkPlatformHealth(): Promise<{ firing: number; cleared: number }> {
   const hourAgo = new Date(Date.now() - 3_600_000)
 
-  const [queue, reachable, failures, total, stuck, size] = await Promise.all([
+  // The blocklist sweep runs first so the alert below sees fresh results.
+  // Certificates are cheap; blocklists are a handful of DNS lookups per IP.
+  await sweepBlocklists().catch((err) => logger.error({ err }, 'blocklist sweep failed'))
+
+  const [queue, reachable, failures, total, stuck, size, certificates, addresses] = await Promise.all([
     postalAdmin.queueStats().catch(() => null),
     postalAdmin.reachable(),
     prisma.webhookDelivery.count({ where: { createdAt: { gte: hourAgo }, succeededAt: null } }),
     prisma.webhookDelivery.count({ where: { createdAt: { gte: hourAgo } } }),
     prisma.message.count({ where: { status: 'QUEUED', createdAt: { lt: hourAgo } } }),
     prisma.$queryRaw<Array<{ bytes: bigint }>>`SELECT pg_database_size(current_database()) AS bytes`,
+    checkAllCertificates().catch(() => []),
+    prisma.ipAddress.findMany({ select: { address: true, blacklistStatus: true } }),
   ])
+
+  const blocklisted = addresses.flatMap((a) => {
+    const results = (a.blacklistStatus ?? []) as Array<{ name: string; listed: boolean }>
+    return results.filter((r) => r.listed).map((r) => `${a.address} on ${r.name}`)
+  })
 
   const alerts = buildHealthAlerts({
     postalUp: reachable,
@@ -67,6 +83,10 @@ export async function checkPlatformHealth(): Promise<{ firing: number; cleared: 
     stuck,
     webhookFailureRate: total > 0 ? failures / total : 0,
     databaseBytes: Number(size[0]?.bytes ?? 0),
+    certificateDays: certificates
+      .filter((c) => c.daysRemaining !== null)
+      .map((c) => ({ host: c.host, days: c.daysRemaining! })),
+    blocklistedIps: blocklisted,
   })
 
   const active = new Set(alerts.map((a) => fingerprint(a.message)))
